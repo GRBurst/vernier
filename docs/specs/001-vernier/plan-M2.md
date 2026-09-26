@@ -238,7 +238,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | T4 | complex word | `src/syllables.rs` | suffix/proper-noun witnesses + P4 against `is_complex = count ≥ 3` | `has_syllabic_suffix`, capitalization | done |
 | T5 | readability formulas + absence | `src/readability.rs`, `src/lib.rs` | witness, P5, P6, P7 against a stub | formulas, `Add`, `Sum` | done |
 | T6 | blocks from prose | `src/prose.rs` | `tight_list_items_are_separate_blocks`, `plain_text_blank_lines_separate_blocks`, P8 | `extract_blocks`, `plain_text_blocks`, `blocks`; `extract_prose` = flatten | done |
-| T7 | block join + offset map | `src/block.rs`, `src/lib.rs` | P9 against identity map | `Block` | todo |
+| T7 | block join + offset map | `src/block.rs`, `src/lib.rs` | P9 against identity map | `Block` | done |
 | T8 | sentence splitting | `src/sentence.rs`, `src/lib.rs` | spike cases, abbreviation laws, P10, P11 against one-sentence-per-block | UAX #29 + merge + trim | todo |
 | T9 | analysis + `LongSentence` | `src/analysis.rs`, `src/lib.rs` | P12, `empty_file_has_absent_metrics` | `analyze` | todo |
 | T10 | `analyze` renders metrics | `src/summary.rs`, `src/main.rs`, `tests/cli.rs` | `analyze_prints_surface_metrics` (expectation from the library); M1's test unchanged | `render` lines 2–3 | todo |
