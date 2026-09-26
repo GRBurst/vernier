@@ -4,7 +4,8 @@
 use std::path::Path;
 
 use crate::analysis::surface_counts;
-use crate::prose::{SourceFormat, prose};
+use crate::block::Block;
+use crate::prose::{SourceFormat, blocks, prose};
 use crate::readability::{Readability, SurfaceCounts, readability};
 use crate::words::count_words;
 
@@ -17,13 +18,16 @@ pub struct FileSummary {
     pub readability: Option<Readability>,
 }
 
-/// Counts the prose spans of `source` and the words in them, and scores its sentences.
+/// Counts the prose spans of `source` and the words of its block prose (so inline markup inside a
+/// word splits no word), and scores its sentences.
 pub fn summarize(source: &str, format: SourceFormat) -> FileSummary {
-    let spans = prose(source, format);
     let counts = surface_counts(source, format);
     FileSummary {
-        spans: spans.len(),
-        words: spans.iter().map(|span| count_words(span.text())).sum(),
+        spans: prose(source, format).len(),
+        words: blocks(source, format)
+            .iter()
+            .map(|spans| count_words(Block::from_spans(spans).text()))
+            .sum(),
         counts,
         readability: readability(counts),
     }
@@ -117,6 +121,68 @@ mod tests {
                 summarize(&md, SourceFormat::Markdown).words
             );
         }
+    }
+
+    /// A paragraph of words, each drawn as two halves and wrapped in emphasis, strong or a link
+    /// as a whole or around one half (intraword markup), optionally followed by a comma or full
+    /// stop; paired with the same paragraph without markup.
+    fn marked_and_stripped() -> impl Strategy<Value = (String, String)> {
+        let shape = prop::sample::select(vec![
+            "{a}{b}",
+            "*{a}{b}*",
+            "**{a}{b}**",
+            "[{a}{b}](u)",
+            "{a}*{b}*",
+            "*{a}*{b}",
+            "{a}**{b}**",
+        ]);
+        let word = (
+            "[a-z]{1,6}",
+            "[a-z]{1,6}",
+            shape,
+            prop::sample::select(vec!["", ",", "."]),
+        )
+            .prop_map(|(a, b, shape, p)| {
+                let marked = shape.replace("{a}", &a).replace("{b}", &b);
+                (format!("{marked}{p}"), format!("{a}{b}{p}"))
+            });
+        let para = prop::collection::vec(word, 1..10).prop_map(|words| {
+            let (marked, stripped): (Vec<String>, Vec<String>) = words.into_iter().unzip();
+            (marked.join(" "), stripped.join(" "))
+        });
+        prop::collection::vec(para, 1..4).prop_map(|paras| {
+            let (marked, stripped): (Vec<String>, Vec<String>) = paras.into_iter().unzip();
+            (marked.join("\n\n"), stripped.join("\n\n"))
+        })
+    }
+
+    proptest! {
+        /// Given paragraphs with inline markup around and inside words, and the same paragraphs
+        /// stripped of it
+        /// When both files are summarized
+        /// Then they have the same word count, and it equals the sentences' summed words
+        #[test]
+        fn inline_markup_changes_no_word_count((marked, stripped) in marked_and_stripped()) {
+            let (m, s) = (summarize(&marked, SourceFormat::Markdown), summarize(&stripped, SourceFormat::Markdown));
+            prop_assert_eq!(m.words, s.words, "{:?}", marked);
+            prop_assert_eq!(m.words, m.counts.words, "{:?}", marked);
+        }
+    }
+
+    /// Given two paragraphs with bold, italic, link and intraword (`un*believ*able`) markup, and
+    /// the same paragraphs without it
+    /// When both are summarized
+    /// Then both count 19 words
+    #[test]
+    fn markup_inside_a_word_keeps_one_word() {
+        let marked = "The **proposal**, which the *executive* committee rejected after \
+                      [extensive](https://x.y) deliberation, caused un*believ*able delays.\n\n\
+                      A second **paragraph** with _emphasis_ here.\n";
+        let stripped = "The proposal, which the executive committee rejected after extensive \
+                        deliberation, caused unbelievable delays.\n\nA second paragraph with \
+                        emphasis here.\n";
+        let words = |md: &str| summarize(md, SourceFormat::Markdown).words;
+        assert_eq!((words(marked), words(stripped)), (19, 19));
     }
 
     /// Given a summary of 3 spans and 42 words for `notes.md`

@@ -331,6 +331,7 @@ W8's empty-alt image was added during F1.1: in `x ![alt](i) y` the dropped alt `
 | 4 | a dropped `Text` does not clear the bit | W9, W5 | [x] (role-dropped `Text` → W9 red; kept `Text` without a span → W5 red) |
 | 5 | `Block::from_spans` ignores the bit | P13 | [x] |
 | 6 | P13 generator without wrappings (mᵢ = none only) | plant #5 no longer fails P13 — shows the generator reaches the wrapped case (audit 005) | [x] (P13 green 3/3 with #5 and #6 planted together) |
+| 7 | `summarize` counts words per prose span (the pre-F1.2b code) | F1.2b `inline_markup_changes_no_word_count` (e.g. `a*a*`: 2 ≠ 1) and `markup_inside_a_word_keeps_one_word` (21 ≠ 19) | [x] (red 3/3 without regression seeds) |
 
 ### Coverage gap (run by hand)
 Inline constructs behind options that `options()` does not enable (footnotes, wikilinks, smart punctuation) are not generated; if an option is enabled later, its events fall into "not transparent" by the `matches!` default — a space, never a wrong join.
@@ -364,4 +365,5 @@ fn is_transparent(tag: TagEnd | &Tag) -> bool  // matches!(…, Emphasis | Stron
 | F1.0 | spec + audit | `spec.md`, `docs/audits/006-…`, this plan | — (docs) | definition corrected | done |
 | F1.1 | join bit per boundary kind | `src/prose.rs`, this plan (ticks) | W1–W9 bits against `joins_previous() → false` (W1–W4 red) | `joinable` state in `extract_blocks`; plants 1–4 | done |
 | F1.2 | block joins on the bit | `src/block.rs`, `src/analysis.rs`, this plan | P13 + W texts red against the always-space join | `from_spans` uses the bit. `parses_the_prose_not_the_markup` changes because its fixture was keyed on the buggy `The proposal , which`; it now expects `EXAMPLE_TEXT` (the corrected text is the parser input the test always meant). Plants 5–6 | done |
+| F1.2b | M1's word count on block prose | `src/summary.rs`, this plan | markup invariance of `summarize(..).words` (marked vs. stripped, intraword markup included) and `words == counts.words`, red against the per-span sum; found by the F1 by-hand check (`un*believ*able` still counted 3 words on the M1 line) | `words` = Σ `count_words(Block::from_spans(b).text())` over `blocks()`; plant 7 | done |
 | F1.3 | close-out | `docs/HANDOVER.md`, this plan | `just verify` | — | todo |
