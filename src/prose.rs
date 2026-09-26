@@ -4,7 +4,7 @@
 use std::ops::Range;
 use std::path::Path;
 
-use pulldown_cmark::{Event, LinkType, Options, Parser, Tag};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
 
 /// A run of prose text and the byte range it occupies in the source.
 ///
@@ -13,6 +13,7 @@ use pulldown_cmark::{Event, LinkType, Options, Parser, Tag};
 pub struct ProseSpan<'a> {
     text: &'a str,
     range: Range<usize>,
+    joins_previous: bool,
 }
 
 impl<'a> ProseSpan<'a> {
@@ -24,6 +25,13 @@ impl<'a> ProseSpan<'a> {
     /// The span's byte range in the source.
     pub fn range(&self) -> Range<usize> {
         self.range.clone()
+    }
+
+    /// True iff only inline emphasis, strong, strikethrough, superscript, subscript or link
+    /// delimiters lie between this span and the previous span of its block (spec 001,
+    /// *Block prose*), so the two are joined without a space.
+    pub fn joins_previous(&self) -> bool {
+        self.joins_previous
     }
 }
 
@@ -91,6 +99,7 @@ pub fn plain_text_blocks(text: &str) -> Vec<Vec<ProseSpan<'_>>> {
             Some(vec![ProseSpan {
                 text: text.get(range.clone())?,
                 range,
+                joins_previous: false,
             }])
         })
         .collect()
@@ -101,6 +110,7 @@ pub fn plain_text_prose(text: &str) -> Vec<ProseSpan<'_>> {
     vec![ProseSpan {
         text,
         range: 0..text.len(),
+        joins_previous: false,
     }]
 }
 
@@ -181,15 +191,17 @@ pub fn extract_blocks(markdown: &str) -> Vec<Vec<ProseSpan<'_>>> {
                     role: role(&tag),
                     is_inline: is_inline(&tag),
                 };
+                blocks.pass(tag.to_end());
                 blocks.close_unless(element.is_inline);
                 open.push(element);
             }
-            Event::End(_) => {
+            Event::End(tag) => {
                 let element = open.pop();
+                blocks.pass(tag);
                 blocks.close_unless(element.is_some_and(|e| e.is_inline));
             }
             Event::Text(text) if keeps(&open) => blocks.push(span_at(markdown, &text, range)),
-            _ => {}
+            _ => blocks.interrupt(),
         }
     }
     blocks.finish()
@@ -207,21 +219,48 @@ struct Open {
     is_inline: bool,
 }
 
-/// The finished blocks and the one being filled; no block is ever empty.
+/// The finished blocks and the one being filled; no block is ever empty. `joinable` holds while
+/// only transparent delimiters have followed the last kept span.
 #[derive(Debug, Default)]
 struct Blocks<'a> {
     done: Vec<Vec<ProseSpan<'a>>>,
     current: Vec<ProseSpan<'a>>,
+    joinable: bool,
 }
 
 impl<'a> Blocks<'a> {
+    /// Adds a kept text's span, joined to the previous span when nothing but transparent
+    /// delimiters lies between; a kept text without a span (a character reference) separates.
     fn push(&mut self, span: Option<ProseSpan<'a>>) {
-        self.current.extend(span);
+        match span {
+            Some(span) => {
+                let joins_previous = self.joinable && !self.current.is_empty();
+                self.current.push(ProseSpan {
+                    joins_previous,
+                    ..span
+                });
+                self.joinable = true;
+            }
+            None => self.interrupt(),
+        }
+    }
+
+    /// Records the start or end of an element: only a transparent one keeps spans joinable.
+    fn pass(&mut self, tag: TagEnd) {
+        if !is_transparent(tag) {
+            self.interrupt();
+        }
+    }
+
+    /// Records something between spans that is not a transparent delimiter.
+    fn interrupt(&mut self) {
+        self.joinable = false;
     }
 
     fn close_unless(&mut self, is_inline: bool) {
         if !is_inline && !self.current.is_empty() {
             self.done.push(std::mem::take(&mut self.current));
+            self.joinable = false;
         }
     }
 
@@ -229,6 +268,20 @@ impl<'a> Blocks<'a> {
         self.close_unless(false);
         self.done
     }
+}
+
+/// Whether the element's delimiters render as nothing between two kept texts. Listed explicitly,
+/// so any other tag (a new one included) separates.
+fn is_transparent(tag: TagEnd) -> bool {
+    matches!(
+        tag,
+        TagEnd::Emphasis
+            | TagEnd::Strong
+            | TagEnd::Strikethrough
+            | TagEnd::Superscript
+            | TagEnd::Subscript
+            | TagEnd::Link
+    )
 }
 
 // why: matched exhaustively, so a new pulldown-cmark tag breaks the build until it is placed.
@@ -266,7 +319,11 @@ fn is_inline(tag: &Tag<'_>) -> bool {
 /// its source spelling is no prose word, so it yields no span.
 fn span_at<'a>(source: &'a str, parsed: &str, range: Range<usize>) -> Option<ProseSpan<'a>> {
     let text = source.get(range.clone()).filter(|slice| *slice == parsed)?;
-    Some(ProseSpan { text, range })
+    Some(ProseSpan {
+        text,
+        range,
+        joins_previous: false,
+    })
 }
 
 #[cfg(test)]
@@ -382,6 +439,66 @@ mod tests {
                 vec!["quoted", "lines"]
             ]
         );
+    }
+
+    /// The join bit of every span after the first, per block.
+    fn join_bits(markdown: &str) -> Vec<Vec<bool>> {
+        extract_blocks(markdown)
+            .iter()
+            .map(|block| {
+                block
+                    .iter()
+                    .skip(1)
+                    .map(ProseSpan::joins_previous)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Given spans separated only by inline strong, emphasis, link or escape boundaries
+    /// (`**The proposal**, which`, `un*believ*able`, `a [b](u) c`, `a\*b`)
+    /// When blocks are extracted
+    /// Then every span after the first joins its predecessor
+    #[test]
+    fn spans_join_across_inline_delimiters() {
+        let cases = [
+            ("**The proposal**, which", vec![true]),
+            ("un*believ*able", vec![true, true]),
+            ("a [b](u) c", vec![true, true]),
+            ("a\\*b", vec![true]),
+        ];
+        let wrong: Vec<(&str, Vec<Vec<bool>>)> = cases
+            .into_iter()
+            .filter(|(markdown, bits)| join_bits(markdown) != [bits.clone()])
+            .map(|(markdown, _)| (markdown, join_bits(markdown)))
+            .collect();
+        assert!(wrong.is_empty(), "wrong bits: {wrong:?}");
+    }
+
+    /// Given spans separated by a character reference, a hard or soft line break, inline code,
+    /// inline HTML, an image (with and without alt text) or a bare autolink
+    /// When blocks are extracted
+    /// Then no span joins its predecessor. (`x ![](i) y` has no text inside the image — events
+    /// `Text "x "`, `Start(Image)`, `End(Image)`, `Text " y"` — so only the image's own boundary
+    /// can separate the spans.)
+    #[test]
+    fn spans_do_not_join_across_anything_else() {
+        let cases = [
+            ("AT&amp;T", vec![false]),
+            ("a  \nb", vec![false]),
+            ("a\nb", vec![false]),
+            ("a `x` b", vec![false]),
+            ("a <i>b</i> c", vec![false, false]),
+            ("x ![alt](i) y", vec![false]),
+            ("x ![](i) y", vec![false]),
+            ("see <http://x.y> now", vec![false]),
+        ];
+        let wrong: Vec<(&str, Vec<Vec<bool>>)> = cases
+            .into_iter()
+            .filter(|(markdown, bits)| join_bits(markdown) != [bits.clone()])
+            .map(|(markdown, _)| (markdown, join_bits(markdown)))
+            .collect();
+        assert!(wrong.is_empty(), "wrong bits: {wrong:?}");
     }
 
     /// Given plain text with hard-wrapped lines, a whitespace-only line and CRLF line ends
@@ -649,6 +766,21 @@ mod tests {
                 let blocks = extract_blocks(&doc.markdown);
                 prop_assert!(blocks.iter().all(|b| !b.is_empty()), "{:?}", doc.markdown);
                 prop_assert_eq!(blocks.concat(), extract_prose(&doc.markdown));
+            }
+
+            /// Given generated Markdown, and plain text
+            /// When their blocks are extracted
+            /// Then the first span of every block never joins a predecessor, and no plain-text
+            /// span joins
+            #[test]
+            fn the_first_span_of_a_block_never_joins(doc in doc()) {
+                for block in extract_blocks(&doc.markdown) {
+                    prop_assert!(!block[0].joins_previous(), "{:?}", doc.markdown);
+                }
+                let plain = plain_text_blocks(&doc.markdown).into_iter().chain([plain_text_prose(&doc.markdown)]);
+                for block in plain {
+                    prop_assert!(block.iter().all(|s| !s.joins_previous()), "{:?}", doc.markdown);
+                }
             }
 
             /// Given generated plain text of non-blank lines separated by blank ones, LF or CRLF

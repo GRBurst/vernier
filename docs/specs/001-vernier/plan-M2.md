@@ -307,10 +307,12 @@ Plain-text spans never join (their bit is `false`), so plain text is unchanged.
 | W5 | `AT&amp;T` | `[false]` | `AT T` |
 | W6 | `a  ⏎b` (hard break) | `[false]` | `a b` |
 | W7 | `a⏎b` (soft break) | `[false]` | `a b` |
-| W8 | ``a `x` b`` / `a <i>b</i> c` / `x ![alt](i) y` | all `false` | one space per dropped construct |
+| W8 | ``a `x` b`` / `a <i>b</i> c` / `x ![alt](i) y` / `x ![](i) y` | all `false` | one space per dropped construct |
 | W9 | `see <http://x.y> now` (autolink, text dropped) | `[false]` | `see   now` — only checked for the bit |
 
 (W5–W9 texts: assert the bit, and for the texts derive "words equal" rather than exact spacing where more than one space is involved.)
+
+W8's empty-alt image was added during F1.1: in `x ![alt](i) y` the dropped alt `Text` already clears the bit, so plant 3 is equivalent there (audit 005). Observed events for `x ![](i) y` with `prose::options()`: `Text "x "` 0..2, `Start(Image)` 2..8, `End(Image)` 2..8, `Text " y"` 8..10; only the image's own boundary can clear the bit.
 
 ### Scenario coverage
 | Spec item | Check |
@@ -323,10 +325,10 @@ Plain-text spans never join (their bit is `false`), so plain text is unchanged.
 ### Planted violations (tick when the red was seen)
 | # | Plant | Must fail | Seen |
 | :--- | :--- | :--- | :--- |
-| 1 | bit always `false` | W1–W4 | [ ] |
-| 2 | bit always `true` | W5–W8 | [ ] |
-| 3 | `Image` in the transparent set | W8 (image) | [ ] |
-| 4 | a dropped `Text` does not clear the bit | W9, W5 | [ ] |
+| 1 | bit always `false` | W1–W4 | [x] |
+| 2 | bit always `true` | W5–W8 | [x] (planted as "true for every span after the first"; all of W5–W9 red) |
+| 3 | `Image` in the transparent set | W8 (empty-alt image `x ![](i) y`) | [x] (only that witness red) |
+| 4 | a dropped `Text` does not clear the bit | W9, W5 | [x] (role-dropped `Text` → W9 red; kept `Text` without a span → W5 red) |
 | 5 | `Block::from_spans` ignores the bit | P13 | [ ] |
 | 6 | P13 generator without wrappings (mᵢ = none only) | plant #5 no longer fails P13 — shows the generator reaches the wrapped case (audit 005) | [ ] |
 
@@ -360,6 +362,6 @@ fn is_transparent(tag: TagEnd | &Tag) -> bool  // matches!(…, Emphasis | Stron
 | ID | Scenario | Files | RED (must fail first) | GREEN | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | F1.0 | spec + audit | `spec.md`, `docs/audits/006-…`, this plan | — (docs) | definition corrected | done |
-| F1.1 | join bit per boundary kind | `src/prose.rs`, this plan (ticks) | W1–W9 bits against `joins_previous() → false` (W1–W4 red) | `joinable` state in `extract_blocks`; plants 1–4 | todo |
+| F1.1 | join bit per boundary kind | `src/prose.rs`, this plan (ticks) | W1–W9 bits against `joins_previous() → false` (W1–W4 red) | `joinable` state in `extract_blocks`; plants 1–4 | done |
 | F1.2 | block joins on the bit | `src/block.rs`, `src/analysis.rs`, this plan | P13 + W texts red against the always-space join | `from_spans` uses the bit. `parses_the_prose_not_the_markup` changes because its fixture was keyed on the buggy `The proposal , which`; it now expects `EXAMPLE_TEXT` (the corrected text is the parser input the test always meant). Plants 5–6 | todo |
 | F1.3 | close-out | `docs/HANDOVER.md`, this plan | `just verify` | — | todo |
