@@ -74,9 +74,9 @@ Expected rejections: building a `DependencyTree` without `new` (private field); 
 
 | Layer | Covers | Needs |
 | :--- | :--- | :--- |
-| Unit (`#[cfg(test)]` per module) | validation laws, projection laws, metric laws P1–P14, the example witnesses | `proptest`; `src/testing.rs` (CoNLL-U reader, example constant, `well_formed_tree()` strategy) |
+| Unit (`#[cfg(test)]` per module) | validation laws, projection laws, metric laws P1–P14, the example witnesses, the `--max-tree-depth` help text (`cli::tests`, via clap's `CommandFactory`) | `proptest`; `src/testing.rs` (CoNLL-U reader, example constant, `well_formed_tree()` strategy) |
 | Engine (`analysis::tests`) | `analyze_parsed` with a `FixtureParser` (text → tokens table), a `ChainParser` (whitespace tokens, each headed by the next) and a `FailingParser` | test-only `Parser` impls in `analysis::tests` |
-| Integration (`tests/cli.rs`) | `--max-tree-depth` help text; existing tests unchanged (no parser reachable from the CLI in M3a) | — |
+| Integration (`tests/cli.rs`) | existing tests unchanged (no parser reachable from the CLI in M3a) | — |
 | End-to-end | N/A in M3a — no real parser until M3b, whose integration test runs the example through a real model | — |
 
 ## Properties
@@ -132,7 +132,7 @@ Each names the concrete input where the mutant differs (audit 005).
 - [ ] `>=` for `HighMdd` → P13 FAIL (chain, `mdd = 1.0 = max_mdd`; ensure the generator of P13 hits equality: draw `max_mdd` from the metric itself half the time).
 - [ ] `analyze_parsed` parses `&source[range]` → `analysis::tests::parses_the_prose_not_the_markup` FAIL (`**The proposal**, which …` — the fixture parser knows only the prose text and returns an error for anything else).
 - [ ] `analyze_parsed` drops `LongSentence` from parsed sentences → P14 FAIL (needs a document with a sentence over the threshold: `document()` with `max` from 0..40 reaches it).
-- [ ] Help text without "edges" → `max_tree_depth_help_says_edges` FAIL.
+- [x] Help text without "edges" → `max_tree_depth_help_says_edges` FAIL.
 
 ## Coverage gap (run by hand)
 
@@ -282,7 +282,7 @@ This plan's ticks go in a separate commit when a task would exceed 5 files.
 | T4 | depth | `src/syntax.rs` | example 4, P9 against `depth = 0` | `depth` | done |
 | T5 | clause count | `src/syntax.rs` | P10, example 1 against `is_clausal = false` | `is_clausal`, `clause_count` | done |
 | T6 | center-embedding | `src/syntax.rs` | example witness, P11, P12 against `vec![]` | `center_embeddings`, `words_between`; then `SyntacticMetrics` + P5 | done |
-| T7 | `--max-tree-depth` help says edges | `src/cli.rs` | `max_tree_depth_help_says_edges` | doc comment | todo |
+| T7 | `--max-tree-depth` help says edges | `src/cli.rs` | `max_tree_depth_help_says_edges` | doc comment | done |
 | T8 | syntactic flags + thresholds | `src/analysis.rs`, `src/main.rs` | P13 against `syntactic_flags = vec![]`; `describe_syntactic` message tests in `main.rs` | `Thresholds` fields, `SyntacticFlag`, `syntactic_flags`, `SentenceSyntax`, `syntax: None` everywhere, `main` builds full `Thresholds` and renders syntactic flags | todo |
 | T9 | engine with a parser | `src/analysis.rs` | P14, `example_is_center_embedded_and_high_mdd_only_below_8_3`, `parses_the_prose_not_the_markup`, parser/malformed errors against `analyze_parsed` = `Ok(analyze(..))` | `analyze_with`, `analyze_parsed`, `AnalysisError`, `dependency_distance` | todo |
 | T10 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | todo |

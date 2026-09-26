@@ -36,7 +36,7 @@ pub struct Args {
     /// Flag a sentence whose mean dependency distance exceeds this (HighMdd).
     #[arg(long, default_value_t = 3.0, value_parser = parse_max_mdd)]
     pub max_mdd: f64,
-    /// Flag a sentence whose dependency tree is deeper than this (DeepTree).
+    /// Flag a sentence whose dependency tree is deeper than this, counting edges from the root (DeepTree).
     #[arg(long, default_value_t = 5)]
     pub max_tree_depth: usize,
     /// Flag a sentence with more subordinate clauses than this (ClauseOverload).
@@ -174,6 +174,26 @@ mod tests {
                 args.max_mdd.to_string(),
                 good.parse::<f64>().unwrap().to_string()
             );
+        }
+    }
+
+    /// Given the rendered help of both commands
+    /// When the `--max-tree-depth` help text is read
+    /// Then it says that depth counts edges
+    #[test]
+    fn max_tree_depth_help_says_edges() {
+        use clap::CommandFactory;
+        let cli = Cli::command();
+        for command in ["analyze", "check"] {
+            let help = cli
+                .find_subcommand(command)
+                .unwrap()
+                .get_arguments()
+                .find(|arg| arg.get_id() == "max_tree_depth")
+                .and_then(|arg| arg.get_help())
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            assert!(help.contains("edges"), "{command}: {help:?}");
         }
     }
 
