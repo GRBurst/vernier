@@ -20,6 +20,8 @@ pub struct Sentence<'b> {
     text: &'b str,
     source_start: usize,
     source_end: usize,
+    block: &'b Block,
+    block_start: usize,
 }
 
 impl<'b> Sentence<'b> {
@@ -31,6 +33,12 @@ impl<'b> Sentence<'b> {
     /// Where the sentence starts and ends in the source file.
     pub fn source_range(&self) -> Range<usize> {
         self.source_start..self.source_end
+    }
+
+    /// The source offset of byte `offset_in_sentence` of the text, through the block's map.
+    pub fn source_offset(&self, offset_in_sentence: usize) -> usize {
+        self.block
+            .source_offset(self.block_start + offset_in_sentence)
     }
 }
 
@@ -74,6 +82,8 @@ fn sentence(block: &Block, range: Range<usize>) -> Option<Sentence<'_>> {
         text,
         source_start: block.source_offset(start),
         source_end: block.source_offset(start + text.len()),
+        block,
+        block_start: start,
     })
 }
 
@@ -95,6 +105,25 @@ mod tests {
 
     fn split_md(markdown: &str) -> Vec<String> {
         split(markdown, SourceFormat::Markdown)
+    }
+
+    /// Given a second sentence whose verb is in bold (`… was **written** by …`)
+    /// When the offset of each word of its text is mapped to the source
+    /// Then each points at that word's first character in the source, markup skipped
+    #[test]
+    fn maps_offsets_in_the_sentence_text_to_the_source() {
+        let source = "First one. The report was **written** by the committee.";
+        let all = blocks(source, SourceFormat::Markdown);
+        let block = Block::from_spans(&all[0]);
+        let found = sentences(&block);
+        let second = &found[1];
+        assert_eq!(second.text(), "The report was written by the committee.");
+        for word in ["The", "report", "was", "written", "by", "committee"] {
+            let in_text = second.text().find(word).unwrap();
+            let in_source = source.find(word).unwrap();
+            assert_eq!(second.source_offset(in_text), in_source, "{word}");
+        }
+        assert_eq!(second.source_offset(0), second.source_range().start);
     }
 
     /// Given the UAX #29 spike's cases

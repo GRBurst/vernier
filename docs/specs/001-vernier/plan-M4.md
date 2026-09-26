@@ -171,12 +171,12 @@ Expected rejections:
 | 1 | `surface_lemma` strips `s` only, with no `ies` → `y` | table row `activities`; P3 (`ity` branch) | [x] |
 | 2 | `is_nominalization` ignores the stoplist | P2 | [x] |
 | 3 | length measured on the word before lemmatizing | `rations` witness (surface count 1 ≠ 0) | [x] |
-| 4 | parsed count ignores `upostag` | `NOMZ` parsed 3 (becomes 4) | [ ] |
-| 5 | parsed count uses `form` instead of `lemma` | `NOMZ` parsed 3 (becomes 2) | [ ] |
+| 4 | parsed count ignores `upostag` | `NOMZ` parsed 3 (becomes 4) | [x] |
+| 5 | parsed count uses `form` instead of `lemma` | `NOMZ` parsed 3 (becomes 2) | [x] |
 | 6 | `passive_heads` without dedup | dedup witness | [x] (P8 red too) |
 | 7 | `align` uses `text.find(form)` from 0 | P9 (repeated forms); `PASSIVE` (two `the`) offsets not increasing | [x] |
-| 8 | the passive offset is always the sentence start | `PASSIVE` witness offsets | [ ] |
-| 9 | `analyze` sets `passives: Some(0)` | P11 | [ ] |
+| 8 | the passive offset is always the sentence start | `PASSIVE` witness offsets | [x] |
+| 9 | `analyze` sets `passives: Some(0)` | P11 | [x] (also M3a P14, whose parse-only eraser now resets `passives`) |
 | 10 | `ratio()` returns `Some(0.0)` for zero words | P7; `empty_file_has_no_nominalization_ratio` | [x] (P7 red in T3; the summary witness is re-planted in T7) |
 | 12 | the possessive strip ignores `’` (U+2019) | P3′ and the `activity’s` / `decisions’` rows (added with audit 008) | [x] (planted twice: bare `’` only → P3′ + `decisions’`; `’s` and `’` → P3′ + both rows) |
 | 11 | P9 generator never inserts an absent form | plant 7′: drop the "cursor unchanged on a miss" rule. It must fail P9 only while the generator inserts; seen green without insertion, red with it (audit 005) | [x] (7′ = a miss advances the cursor by the form's length: P9 red 3/3 with insertion, green 3/3 with the generator fixed to no insertion) |
@@ -254,6 +254,6 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13;
 | T3 | predicate + counts + monoid | `src/nominalization.rs` | P2, P4, P5, P6, P7, `rations` against `is_nominalization → false` and a zero `ratio`; plants 2, 3, 10 | `is_nominalization`, `surface_nominalizations`, `parsed_nominalizations`, `NominalizationCount` | done |
 | T4 | passive heads + alignment | `src/passive.rs`, `src/lib.rs`, `src/testing.rs` (`NOMZ_*`, `PASSIVE_*`) | P8, P9, dedup and `PASSIVE` heads against empty outputs; plants 6, 7, 11 | `passive_heads`, `align` | done |
 | T5 | surface wiring | `src/analysis.rs` | P10 (no parse) and the `NOMZ` surface 4/14 against a zero count; P11's `None` half | `SentenceAnalysis`/`FileAnalysis.nominalizations`, `passives: None`. Existing struct-literal tests get the new fields only | done |
-| T6 | parsed wiring | `src/analysis.rs`, `src/sentence.rs` (if `source_offset` is missing) | `NOMZ` parsed 3/14, `PASSIVE` offsets, P11's `Some` half, P12 against the surface count and no passives; plants 4, 5, 8, 9 | `SentenceSyntax.{passives, nominalizations}`, file `passives` | todo |
+| T6 | parsed wiring | `src/analysis.rs`, `src/sentence.rs` (if `source_offset` is missing) | `NOMZ` parsed 3/14, `PASSIVE` offsets, P11's `Some` half, P12 against the surface count and no passives; plants 4, 5, 8, 9 | `SentenceSyntax.{passives, nominalizations}`, file `passives` | done |
 | T7 | `analyze` prints line 4 | `src/summary.rs`, `tests/cli.rs`, `tests/fixtures/nominal.md` | `analyze_prints_the_nominalization_ratio` (expectation from `render(summarize(..))` plus the `4 of 14` literal the user reads) and `empty_file_has_no_nominalization_ratio` in `summary` | `FileSummary.nominalizations`, render line 4 | todo |
 | T8 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md` (pybiber notice, status), this plan (ticks) | `just verify`; every plant seen red; the by-hand run | — | todo |

@@ -238,6 +238,7 @@ mod tests {
             syntax: Some(analysis::SentenceSyntax {
                 metrics,
                 flags: syntactic,
+                passives: Vec::new(),
             }),
             nominalizations: vernier::nominalization::NominalizationCount::default(),
         }

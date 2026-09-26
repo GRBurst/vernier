@@ -5,8 +5,11 @@ use std::convert::Infallible;
 use std::ops::Range;
 
 use crate::block::Block;
-use crate::dependency::{DependencyTree, Parser, TreeError};
-use crate::nominalization::{NominalizationCount, Stoplist, surface_nominalizations};
+use crate::dependency::{DependencyTree, Parser, Token, TreeError};
+use crate::nominalization::{
+    NominalizationCount, Stoplist, parsed_nominalizations, surface_nominalizations,
+};
+use crate::passive::{Passive, align, passive_heads};
 use crate::prose::{SourceFormat, blocks, prose};
 use crate::readability::{Readability, SurfaceCounts, readability};
 use crate::sentence::{Sentence, sentences};
@@ -52,6 +55,8 @@ pub enum SyntacticFlag {
 pub struct SentenceSyntax {
     pub metrics: SyntacticMetrics,
     pub flags: Vec<SyntacticFlag>,
+    /// The sentence's passive constructions, in token order.
+    pub passives: Vec<Passive>,
 }
 
 /// One sentence's position, counts, scores and flags; `syntax` is `None` when it was not parsed.
@@ -94,7 +99,7 @@ pub enum AnalysisError<E: std::error::Error> {
 /// Analyzes `source`, read as `format`: every sentence's counts, scores and flags, and the file's
 /// totals and scores (formulas over the summed counts, never averages of sentence scores).
 pub fn analyze(source: &str, format: SourceFormat, thresholds: &Thresholds) -> FileAnalysis {
-    let Ok(file) = analyze_with::<Infallible>(source, format, thresholds, |_| Ok(None));
+    let Ok(file) = analyze_with::<Infallible>(source, format, thresholds, |_, _| Ok(None));
     file
 }
 
@@ -106,17 +111,15 @@ pub fn analyze_parsed<P: Parser>(
     thresholds: &Thresholds,
     parser: &P,
 ) -> Result<FileAnalysis, AnalysisError<P::Error>> {
-    let file = analyze_with(source, format, thresholds, |sentence| {
-        parse_sentence(sentence, thresholds, parser).map(Some)
+    let file = analyze_with(source, format, thresholds, |sentence, stoplist| {
+        parse_sentence(sentence, thresholds, stoplist, parser).map(Some)
     })?;
-    let dependency_distance = file
-        .sentences
-        .iter()
-        .filter_map(|s| s.syntax.as_ref())
-        .map(|syntax| syntax.metrics.distance)
-        .sum();
+    let parsed = file.sentences.iter().filter_map(|s| s.syntax.as_ref());
+    let dependency_distance = parsed.clone().map(|syntax| syntax.metrics.distance).sum();
+    let passives = parsed.map(|syntax| syntax.passives.len()).sum();
     Ok(FileAnalysis {
         dependency_distance: Some(dependency_distance),
+        passives: Some(passives),
         ..file
     })
 }
@@ -127,25 +130,36 @@ pub fn surface_counts(source: &str, format: SourceFormat) -> SurfaceCounts {
     counts.into_iter().sum()
 }
 
-/// The analysis of `source`, with `syntax` giving each sentence's syntax (or `None` when there is
-/// no parser); the file's dependency distance is left `None` for the caller to fill.
+/// What a parse adds to one sentence: its syntax, and its nominalizations among `NOUN` tokens.
+struct Parsed {
+    syntax: SentenceSyntax,
+    nominalizations: usize,
+}
+
+/// The analysis of `source`, with `parse` giving each sentence's parse (or `None` when there is
+/// no parser); the file's dependency distance and passives are left `None` for the caller to fill.
 fn analyze_with<E>(
     source: &str,
     format: SourceFormat,
     thresholds: &Thresholds,
-    syntax: impl Fn(&Sentence<'_>) -> Result<Option<SentenceSyntax>, E>,
+    parse: impl Fn(&Sentence<'_>, &Stoplist) -> Result<Option<Parsed>, E>,
 ) -> Result<FileAnalysis, E> {
     let stoplist = Stoplist::committed();
     let sentences = each_sentence(source, format, |sentence| {
         let counts = sentence_counts(sentence);
+        let parsed = parse(sentence, &stoplist)?;
+        let nominalizations = parsed.as_ref().map_or_else(
+            || surface_nominalizations(words(sentence.text()), &stoplist),
+            |p| p.nominalizations,
+        );
         Ok(SentenceAnalysis {
             source_range: sentence.source_range(),
             counts,
             readability: readability(counts),
             flags: flags(counts, thresholds),
-            syntax: syntax(sentence)?,
+            syntax: parsed.map(|p| p.syntax),
             nominalizations: NominalizationCount {
-                nominalizations: surface_nominalizations(words(sentence.text()), &stoplist),
+                nominalizations,
                 words: counts.words,
             },
         })
@@ -162,12 +176,14 @@ fn analyze_with<E>(
     })
 }
 
-/// The parse of one sentence's text, its syntactic metrics and the syntactic rules it breaks.
+/// The parse of one sentence's text: its syntactic metrics, the syntactic rules it breaks, its
+/// passives and its nominalizations.
 fn parse_sentence<P: Parser>(
     sentence: &Sentence<'_>,
     thresholds: &Thresholds,
+    stoplist: &Stoplist,
     parser: &P,
-) -> Result<SentenceSyntax, AnalysisError<P::Error>> {
+) -> Result<Parsed, AnalysisError<P::Error>> {
     let tokens = parser
         .parse(sentence.text())
         .map_err(AnalysisError::Parse)?;
@@ -176,10 +192,29 @@ fn parse_sentence<P: Parser>(
         source,
     })?;
     let metrics = syntactic_metrics(&tree);
-    Ok(SentenceSyntax {
-        flags: syntactic_flags(&metrics, thresholds),
-        metrics,
+    Ok(Parsed {
+        nominalizations: parsed_nominalizations(tree.tokens(), stoplist),
+        syntax: SentenceSyntax {
+            flags: syntactic_flags(&metrics, thresholds),
+            metrics,
+            passives: passives(sentence, tree.tokens()),
+        },
     })
+}
+
+/// Each passive head of `tokens`, at its verb's first character in the source, or at the
+/// sentence's first character when its form is not found in the text.
+fn passives(sentence: &Sentence<'_>, tokens: &[Token]) -> Vec<Passive> {
+    let offsets = align(tokens, sentence.text());
+    passive_heads(tokens)
+        .into_iter()
+        .map(|head| Passive {
+            verb: tokens[head - 1].form.clone(),
+            source_offset: offsets[head - 1].map_or(sentence.source_range().start, |at| {
+                sentence.source_offset(at)
+            }),
+        })
+        .collect()
 }
 
 /// `f` applied to every sentence of `source`, in source order, stopping at the first error.
@@ -254,8 +289,11 @@ pub fn syntactic_flags(metrics: &SyntacticMetrics, thresholds: &Thresholds) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dependency::Token;
-    use crate::testing::{EXAMPLE_CONLLU, EXAMPLE_TEXT, NOMZ_TEXT, tokens_from_conllu};
+    use crate::nominalization::{parsed_nominalizations, surface_lemma};
+    use crate::testing::{
+        EXAMPLE_CONLLU, EXAMPLE_TEXT, NOMZ_CONLLU, NOMZ_TEXT, PASSIVE_CONLLU, PASSIVE_TEXT,
+        tokens_from_conllu,
+    };
     use crate::words::count_words;
     use proptest::prelude::*;
 
@@ -461,6 +499,76 @@ mod tests {
         assert_eq!(file.passives, None);
     }
 
+    /// Given the NOMZ sentence and its UDPipe 2 parse
+    /// When it is analyzed with that parse
+    /// Then it has 3 nominalizations of 14 words: `commission` is a VERB, `decisions` counts by
+    /// its lemma `decision`, and the words stay M2's
+    #[test]
+    fn counts_parsed_nominalizations_of_the_nomz_sentence() {
+        let parser = FixtureParser(vec![(
+            NOMZ_TEXT.to_owned(),
+            tokens_from_conllu(NOMZ_CONLLU),
+        )]);
+        let file =
+            analyze_parsed(NOMZ_TEXT, SourceFormat::Markdown, &thresholds(25), &parser).unwrap();
+        let expected = NominalizationCount {
+            nominalizations: 3,
+            words: 14,
+        };
+        assert_eq!(file.sentences[0].nominalizations, expected);
+        assert_eq!(file.nominalizations, expected);
+    }
+
+    /// Given the PASSIVE sentence, as plain text and with its first verb in bold, and its parse
+    /// When it is analyzed with that parse
+    /// Then it reports `written` and `rejected` at their first characters in the source, and the
+    /// file counts 2 passives
+    #[test]
+    fn reports_passives_at_their_verbs() {
+        let parser = FixtureParser(vec![(
+            PASSIVE_TEXT.to_owned(),
+            tokens_from_conllu(PASSIVE_CONLLU),
+        )]);
+        let bold = PASSIVE_TEXT.replacen("written", "**written**", 1);
+        for source in [PASSIVE_TEXT.to_owned(), bold] {
+            let file =
+                analyze_parsed(&source, SourceFormat::Markdown, &thresholds(25), &parser).unwrap();
+            let passives = &file.sentences[0].syntax.as_ref().unwrap().passives;
+            let expected = ["written", "rejected"].map(|verb| Passive {
+                verb: verb.to_owned(),
+                source_offset: source.find(verb).unwrap(),
+            });
+            assert_eq!(passives, &expected, "{source:?}");
+            assert_eq!(file.passives, Some(2));
+        }
+    }
+
+    /// Chains each sentence's whitespace tokens like `ChainParser`, tags them `NOUN` with their
+    /// surface lemma, makes every token at an even index an `aux:pass` of the token two places
+    /// on, and upper-cases the second token's form, so one passive verb cannot be found in the
+    /// text and falls back to the sentence start.
+    struct PassiveChainParser;
+
+    impl Parser for PassiveChainParser {
+        type Error = Unparsable;
+
+        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
+            let mut tokens = ChainParser.parse(sentence)?;
+            let n = tokens.len();
+            for (i, token) in tokens.iter_mut().enumerate() {
+                token.upostag = "NOUN".to_owned();
+                token.lemma = surface_lemma(&token.form);
+                if i % 2 == 0 && i + 2 < n {
+                    token.deprel = "aux:pass".to_owned();
+                }
+                if i == 1 {
+                    token.form = token.form.to_uppercase();
+                }
+            }
+            Ok(tokens)
+        }
+    }
+
     /// Paragraphs of sentences mixing nominalizations (plain, plural, possessive, stoplisted,
     /// capitalized) with other words.
     fn nominal_document() -> impl Strategy<Value = String> {
@@ -495,6 +603,7 @@ mod tests {
                 })
                 .collect(),
             dependency_distance: None,
+            passives: None,
             ..file.clone()
         }
     }
@@ -701,6 +810,36 @@ mod tests {
             prop_assert_eq!(file.nominalizations, sum);
             prop_assert_eq!(file.nominalizations.words, file.totals.words);
             prop_assert_eq!(file.passives, None);
+        }
+
+        /// Given generated paragraphs with nominalizations, and a parser that marks passives
+        /// When the file is analyzed with and without it
+        /// Then without it passive voice is absent; with it the file counts the sentences'
+        /// passives, each at its verb in the source or at the sentence start when the verb's form
+        /// is not in the text (both occur), and nominalizations come from the parse over M2 words
+        #[test]
+        fn parsed_passives_and_nominalizations_add_up(doc in nominal_document()) {
+            prop_assert_eq!(md(&doc, 25).passives, None);
+            let file = analyze_parsed(&doc, SourceFormat::Markdown, &thresholds(25), &PassiveChainParser).unwrap();
+            let mut passives = 0;
+            for s in &file.sentences {
+                let syntax = s.syntax.as_ref().expect("parsed");
+                passives += syntax.passives.len();
+                for p in &syntax.passives {
+                    prop_assert!(s.source_range.contains(&p.source_offset), "{:?} {:?}", p, s.source_range);
+                    prop_assert!(
+                        doc[p.source_offset..].starts_with(&p.verb) || p.source_offset == s.source_range.start,
+                        "{:?}", p
+                    );
+                }
+                let tokens = PassiveChainParser.parse(&doc[s.source_range.clone()]).unwrap();
+                prop_assert_eq!(s.nominalizations.nominalizations, parsed_nominalizations(&tokens, &Stoplist::committed()));
+                prop_assert_eq!(s.nominalizations.words, s.counts.words);
+            }
+            prop_assert_eq!(file.passives, Some(passives));
+            let sum: NominalizationCount = file.sentences.iter().map(|s| s.nominalizations).sum();
+            prop_assert_eq!(file.nominalizations, sum);
+            prop_assert_eq!(file.nominalizations.words, file.totals.words);
         }
 
         /// Given generated Markdown paragraphs
