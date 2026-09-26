@@ -1,0 +1,63 @@
+# Nouns with a nominalization suffix that are not read as nominalizations.
+# One lower-case lemma per line; `#` starts a comment. Matched on the lemma, so plurals need no entry.
+#
+# Seeded from pybiber 0.3.1 (commit b34f4a59e64ce4f9740863be4925d2f75cc8cf11),
+# pybiber/biber_dict.py, "nominalization_stoplist": its singular forms, unchanged.
+# Copyright (c) 2025 David Brown, MIT License; see nominalization-stoplist.PYBIBER-LICENSE.
+apartment
+attention
+business
+capacity
+city
+comment
+condition
+document
+edition
+element
+environment
+experiment
+fiction
+function
+humanity
+identity
+mention
+moment
+motion
+nation
+notion
+pity
+position
+quality
+section
+solution
+station
+tradition
+university
+witness
+#
+# Added for vernier: the most frequent suffix matches of length >= 7 that the
+# research oracle labelled "not a nominalization" (docs/specs/001-vernier/research/metrics.md §4,
+# top 10k lemmas of the hermitdave en_50k list), minus the three the manual check
+# found to be real nominalizations (ability, entrance; solution stays from pybiber).
+advance
+ambulance
+audience
+audition
+authority
+balance
+basement
+charity
+circumstance
+compliment
+conscience
+department
+influence
+instance
+mission
+occasion
+passion
+question
+science
+sentence
+session
+version
