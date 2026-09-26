@@ -3,10 +3,15 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
+/// The words of `text`, in order, each a slice of it.
+pub fn words(text: &str) -> impl Iterator<Item = &str> {
+    // `unicode_words` keeps exactly the UAX #29 segments with an alphanumeric character.
+    text.unicode_words()
+}
+
 /// The number of words in `text`.
 pub fn count_words(text: &str) -> usize {
-    // `unicode_words` keeps exactly the UAX #29 segments with an alphanumeric character.
-    text.unicode_words().count()
+    words(text).count()
 }
 
 #[cfg(test)]
@@ -26,7 +31,26 @@ mod tests {
         prop::collection::vec(piece, 0..12).prop_map(|p| p.concat())
     }
 
+    fn text() -> impl Strategy<Value = String> {
+        (prop::collection::vec((word(), non_word()), 0..10))
+            .prop_map(|pairs| pairs.into_iter().map(|(w, n)| format!("{w}{n}")).collect())
+    }
+
     proptest! {
+        /// Given any text of words and punctuation
+        /// When its words are listed
+        /// Then there are as many as it counts, each a slice of the text, in order
+        #[test]
+        fn words_are_the_counted_slices_in_order(text in text()) {
+            prop_assert_eq!(words(&text).count(), count_words(&text));
+            let mut rest = text.as_str();
+            for word in words(&text) {
+                let at = rest.find(word);
+                prop_assert!(at.is_some(), "{:?} not after the previous word in {:?}", word, text);
+                rest = &rest[at.unwrap_or(0) + word.len()..];
+            }
+        }
+
         /// Given two texts that each end and start on a word
         /// When they are joined by a space
         /// Then the word count of the join is the sum of their counts

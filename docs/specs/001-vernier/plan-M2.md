@@ -231,7 +231,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | ID | Scenario | Files | RED (must fail first) | GREEN | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | T0 | spec fix for plain-text line breaks | `spec.md`, `docs/audits/004-…`, this plan | — (docs) | definition corrected | done |
-| T1 | `words()` iterator (refactor) | `src/words.rs` | P1 against a `words` stub yielding nothing | `count_words = words().count()`; existing P6 still green (before/after evidence) | todo |
+| T1 | `words()` iterator (refactor) | `src/words.rs` | P1 against a `words` stub yielding nothing | `count_words = words().count()`; existing P6 still green (before/after evidence) | done |
 | T2 | syllable counter | `src/syllables.rs`, `src/lib.rs` | P2, P3 against `fn count_syllables(_) -> usize { 0 }` | port | todo |
 | T3 | 500-word reference + measurement | `measurements/{sample_cmudict.py, cmudict-500.tsv, CMUDICT-LICENSE, syllables.md}`, `src/syllables.rs` (test) | agreement test against a TSV with 60 rows corrupted (planted), then real TSV | run generator, record rate and misses | todo |
 | T4 | complex word | `src/syllables.rs` | suffix/proper-noun witnesses + P4 against `is_complex = count ≥ 3` | `has_syllabic_suffix`, capitalization | todo |
