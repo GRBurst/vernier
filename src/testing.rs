@@ -28,6 +28,9 @@ pub(crate) fn tokens_from_conllu(conllu: &str) -> Vec<Token> {
         .collect()
 }
 
+/// The spec's M3a example sentence.
+pub(crate) const EXAMPLE_TEXT: &str = "The proposal, which the executive committee rejected after extensive deliberation, caused significant delays.";
+
 /// The spec's M3a example sentence parsed by UDPipe 2 (LINDAT REST service, model
 /// `english-ewt-ud-2.17-251125`, fetched 2026-09-27); used as test data only.
 pub(crate) const EXAMPLE_CONLLU: &str = "\

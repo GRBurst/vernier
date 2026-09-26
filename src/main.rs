@@ -262,6 +262,7 @@ mod tests {
             ],
             totals: vernier::readability::SurfaceCounts::default(),
             readability: None,
+            dependency_distance: None,
         };
         let lines = diagnostics(Path::new("f.md"), source, &analysis, &THRESHOLDS).unwrap();
         assert_eq!(

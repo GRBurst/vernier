@@ -1,14 +1,16 @@
 //! Analysis (spec 001 M2, M3a): per-sentence and per-file surface counts, scores and flags, and
 //! the syntactic metrics and flags of a parsed sentence.
 
+use std::convert::Infallible;
 use std::ops::Range;
 
 use crate::block::Block;
+use crate::dependency::{DependencyTree, Parser, TreeError};
 use crate::prose::{SourceFormat, blocks, prose};
 use crate::readability::{Readability, SurfaceCounts, readability};
 use crate::sentence::{Sentence, sentences};
 use crate::syllables::{count_syllables, is_complex};
-use crate::syntax::{CenterEmbedding, SyntacticMetrics};
+use crate::syntax::{CenterEmbedding, DependencyDistance, SyntacticMetrics, syntactic_metrics};
 use crate::words::words;
 
 /// The limits a sentence is checked against (built by the shell from the command line).
@@ -61,57 +63,130 @@ pub struct SentenceAnalysis {
     pub syntax: Option<SentenceSyntax>,
 }
 
-/// One file's sentences, the sum of their counts, and the file's scores computed from that sum.
+/// One file's sentences, the sum of their counts, and the file's scores computed from that sum;
+/// `dependency_distance` sums the sentences' distances and is `None` when nothing was parsed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileAnalysis {
     pub spans: usize,
     pub sentences: Vec<SentenceAnalysis>,
     pub totals: SurfaceCounts,
     pub readability: Option<Readability>,
+    pub dependency_distance: Option<DependencyDistance>,
+}
+
+/// Why a file could not be analyzed with a parser.
+#[derive(Debug, thiserror::Error)]
+pub enum AnalysisError<E: std::error::Error> {
+    #[error("the parser failed: {0}")]
+    Parse(#[source] E),
+    #[error("the parse of the sentence at byte {sentence_start} is not a tree: {source}")]
+    Malformed {
+        sentence_start: usize,
+        source: TreeError,
+    },
 }
 
 /// Analyzes `source`, read as `format`: every sentence's counts, scores and flags, and the file's
 /// totals and scores (formulas over the summed counts, never averages of sentence scores).
 pub fn analyze(source: &str, format: SourceFormat, thresholds: &Thresholds) -> FileAnalysis {
-    let sentences: Vec<SentenceAnalysis> = counted_sentences(source, format)
-        .into_iter()
-        .map(|(source_range, counts)| SentenceAnalysis {
-            source_range,
-            counts,
-            readability: readability(counts),
-            flags: flags(counts, thresholds),
-            syntax: None,
-        })
-        .collect();
-    let totals = sentences.iter().map(|s| s.counts).sum();
-    FileAnalysis {
-        spans: prose(source, format).len(),
-        sentences,
-        totals,
-        readability: readability(totals),
-    }
+    let Ok(file) = analyze_with::<Infallible>(source, format, thresholds, |_| Ok(None));
+    file
+}
+
+/// Analyzes `source` like `analyze`, and also parses every sentence's text with `parser` to add
+/// its syntactic metrics and flags, and the file's summed dependency distance.
+pub fn analyze_parsed<P: Parser>(
+    source: &str,
+    format: SourceFormat,
+    thresholds: &Thresholds,
+    parser: &P,
+) -> Result<FileAnalysis, AnalysisError<P::Error>> {
+    let file = analyze_with(source, format, thresholds, |sentence| {
+        parse_sentence(sentence, thresholds, parser).map(Some)
+    })?;
+    let dependency_distance = file
+        .sentences
+        .iter()
+        .filter_map(|s| s.syntax.as_ref())
+        .map(|syntax| syntax.metrics.distance)
+        .sum();
+    Ok(FileAnalysis {
+        dependency_distance: Some(dependency_distance),
+        ..file
+    })
 }
 
 /// The summed counts of every sentence of `source`, read as `format`.
 pub fn surface_counts(source: &str, format: SourceFormat) -> SurfaceCounts {
-    counted_sentences(source, format)
-        .into_iter()
-        .map(|(_, counts)| counts)
-        .sum()
+    let Ok(counts) = each_sentence::<_, Infallible>(source, format, |s| Ok(sentence_counts(s)));
+    counts.into_iter().sum()
 }
 
-/// Each sentence's source range and counts, in source order.
-fn counted_sentences(source: &str, format: SourceFormat) -> Vec<(Range<usize>, SurfaceCounts)> {
-    blocks(source, format)
+/// The analysis of `source`, with `syntax` giving each sentence's syntax (or `None` when there is
+/// no parser); the file's dependency distance is left `None` for the caller to fill.
+fn analyze_with<E>(
+    source: &str,
+    format: SourceFormat,
+    thresholds: &Thresholds,
+    syntax: impl Fn(&Sentence<'_>) -> Result<Option<SentenceSyntax>, E>,
+) -> Result<FileAnalysis, E> {
+    let sentences = each_sentence(source, format, |sentence| {
+        let counts = sentence_counts(sentence);
+        Ok(SentenceAnalysis {
+            source_range: sentence.source_range(),
+            counts,
+            readability: readability(counts),
+            flags: flags(counts, thresholds),
+            syntax: syntax(sentence)?,
+        })
+    })?;
+    let totals = sentences.iter().map(|s| s.counts).sum();
+    Ok(FileAnalysis {
+        spans: prose(source, format).len(),
+        sentences,
+        totals,
+        readability: readability(totals),
+        dependency_distance: None,
+    })
+}
+
+/// The parse of one sentence's text, its syntactic metrics and the syntactic rules it breaks.
+fn parse_sentence<P: Parser>(
+    sentence: &Sentence<'_>,
+    thresholds: &Thresholds,
+    parser: &P,
+) -> Result<SentenceSyntax, AnalysisError<P::Error>> {
+    let tokens = parser
+        .parse(sentence.text())
+        .map_err(AnalysisError::Parse)?;
+    let tree = DependencyTree::new(tokens).map_err(|source| AnalysisError::Malformed {
+        sentence_start: sentence.source_range().start,
+        source,
+    })?;
+    let metrics = syntactic_metrics(&tree);
+    Ok(SentenceSyntax {
+        flags: syntactic_flags(&metrics, thresholds),
+        metrics,
+    })
+}
+
+/// `f` applied to every sentence of `source`, in source order, stopping at the first error.
+fn each_sentence<T, E>(
+    source: &str,
+    format: SourceFormat,
+    mut f: impl FnMut(&Sentence<'_>) -> Result<T, E>,
+) -> Result<Vec<T>, E> {
+    let per_block = blocks(source, format)
         .iter()
-        .flat_map(|spans| {
+        .map(|spans| {
             let block = Block::from_spans(spans);
             sentences(&block)
                 .iter()
-                .map(|s| (s.source_range(), sentence_counts(s)))
-                .collect::<Vec<_>>()
+                .map(&mut f)
+                .collect::<Result<Vec<T>, E>>()
         })
-        .collect()
+        .collect::<Result<Vec<Vec<T>>, E>>()?;
+    Ok(per_block.into_iter().flatten().collect())
 }
 
 /// One sentence's counts; only its first word is sentence-initial.
@@ -167,21 +242,211 @@ pub fn syntactic_flags(metrics: &SyntacticMetrics, thresholds: &Thresholds) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::DependencyDistance;
+    use crate::dependency::Token;
+    use crate::testing::{EXAMPLE_CONLLU, EXAMPLE_TEXT, tokens_from_conllu};
     use crate::words::count_words;
     use proptest::prelude::*;
+
+    fn thresholds(max_sentence_len: usize) -> Thresholds {
+        Thresholds {
+            max_sentence_len,
+            max_mdd: 3.0,
+            max_tree_depth: 5,
+            max_clauses: 2,
+        }
+    }
 
     fn md(source: &str, max_sentence_len: usize) -> FileAnalysis {
         analyze(
             source,
             SourceFormat::Markdown,
-            &Thresholds {
-                max_sentence_len,
-                max_mdd: 3.0,
-                max_tree_depth: 5,
-                max_clauses: 2,
-            },
+            &thresholds(max_sentence_len),
         )
+    }
+
+    #[derive(Debug, PartialEq, Eq, thiserror::Error)]
+    #[error("no parse for {0:?}")]
+    struct Unparsable(String);
+
+    /// Knows the parses of a fixed table of sentence texts and fails on any other text.
+    struct FixtureParser(Vec<(String, Vec<Token>)>);
+
+    impl Parser for FixtureParser {
+        type Error = Unparsable;
+
+        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
+            self.0
+                .iter()
+                .find(|(text, _)| text == sentence)
+                .map(|(_, tokens)| tokens.clone())
+                .ok_or_else(|| Unparsable(sentence.to_owned()))
+        }
+    }
+
+    /// Splits at whitespace and heads every token by the next; the last is the root.
+    struct ChainParser;
+
+    impl Parser for ChainParser {
+        type Error = Unparsable;
+
+        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
+            let forms: Vec<&str> = sentence.split_whitespace().collect();
+            let n = forms.len();
+            Ok(forms
+                .iter()
+                .enumerate()
+                .map(|(i, form)| Token {
+                    id: i + 1,
+                    form: (*form).to_owned(),
+                    lemma: (*form).to_owned(),
+                    upostag: "X".to_owned(),
+                    head: if i + 1 == n { 0 } else { i + 2 },
+                    deprel: if i + 1 == n { "root" } else { "dep" }.to_owned(),
+                })
+                .collect())
+        }
+    }
+
+    /// Fails on every sentence.
+    struct FailingParser;
+
+    impl Parser for FailingParser {
+        type Error = Unparsable;
+
+        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
+            Err(Unparsable(sentence.to_owned()))
+        }
+    }
+
+    fn example_parser(text: &str) -> FixtureParser {
+        FixtureParser(vec![(text.to_owned(), tokens_from_conllu(EXAMPLE_CONLLU))])
+    }
+
+    fn proposal_caused_8() -> SyntacticFlag {
+        SyntacticFlag::CenterEmbedding(CenterEmbedding {
+            subject: "proposal".to_owned(),
+            verb: "caused".to_owned(),
+            words_between: 8,
+        })
+    }
+
+    /// Given the M3a example sentence and its UDPipe 2 parse (MDD 32/12 = 8/3, depth 4, 1 clause)
+    /// When it is analyzed with `max_mdd` 2.5, and with 3.0
+    /// Then it is flagged HighMdd (carrying 8/3) and CenterEmbedding at 2.5, only CenterEmbedding
+    /// at 3.0, and never DeepTree or ClauseOverload
+    #[test]
+    fn example_is_center_embedded_and_high_mdd_only_below_8_3() {
+        let parser = example_parser(EXAMPLE_TEXT);
+        let flags_at = |max_mdd: f64| {
+            let t = Thresholds {
+                max_mdd,
+                ..thresholds(25)
+            };
+            let file = analyze_parsed(EXAMPLE_TEXT, SourceFormat::Markdown, &t, &parser).unwrap();
+            assert_eq!(file.sentences.len(), 1);
+            file.sentences[0].syntax.clone().unwrap().flags
+        };
+        assert_eq!(
+            flags_at(2.5),
+            [
+                SyntacticFlag::HighMdd { mdd: 32.0 / 12.0 },
+                proposal_caused_8()
+            ]
+        );
+        assert_eq!(flags_at(3.0), [proposal_caused_8()]);
+    }
+
+    /// Given the example sentence with its subject in bold (`**The proposal**, which …`), and a
+    /// parser that knows only the sentence's prose text (block prose joins the bold span and the
+    /// rest with one space, so the text reads "The proposal , which …") and fails on anything else
+    /// When it is analyzed with that parser
+    /// Then the parser is given the prose, not the markup, and the center-embedding is reported
+    #[test]
+    fn parses_the_prose_not_the_markup() {
+        let source = EXAMPLE_TEXT.replacen("The proposal", "**The proposal**", 1);
+        let prose = EXAMPLE_TEXT.replacen("proposal,", "proposal ,", 1);
+        let parser = example_parser(&prose);
+        let file = analyze_parsed(&source, SourceFormat::Markdown, &thresholds(25), &parser);
+        let syntax = file.unwrap().sentences[0].syntax.clone().unwrap();
+        assert!(syntax.flags.contains(&proposal_caused_8()), "{syntax:?}");
+    }
+
+    /// Given a file and a parser that fails on every sentence
+    /// When the file is analyzed with it
+    /// Then the analysis fails with the parser's error
+    #[test]
+    fn a_parser_failure_fails_the_analysis() {
+        let result = analyze_parsed(
+            "One sentence here.",
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &FailingParser,
+        );
+        assert!(
+            matches!(&result, Err(AnalysisError::Parse(Unparsable(text))) if text == "One sentence here."),
+            "{result:?}"
+        );
+    }
+
+    /// Given a file whose second sentence (at byte 17) the parser returns as a cycle
+    /// When the file is analyzed with it
+    /// Then the analysis fails as malformed, naming the sentence's start and the tree error
+    #[test]
+    fn a_malformed_parse_fails_the_analysis_at_its_sentence() {
+        let cycle = tokens_from_conllu("1 Broken broken X _ _ 2 dep\n2 one. one X _ _ 1 dep");
+        let parser = FixtureParser(vec![
+            (
+                "Fine words here.".to_owned(),
+                ChainParser.parse("Fine words here.").unwrap(),
+            ),
+            ("Broken one.".to_owned(), cycle),
+        ]);
+        let result = analyze_parsed(
+            "Fine words here. Broken one.",
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &parser,
+        );
+        assert!(
+            matches!(
+                &result,
+                Err(AnalysisError::Malformed {
+                    sentence_start: 17,
+                    source: TreeError::Cycle { .. }
+                })
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// Given an empty file
+    /// When it is analyzed without a parser, and with one
+    /// Then its dependency distance is absent without a parser and zero with one
+    #[test]
+    fn dependency_distance_is_absent_without_a_parser_and_zero_with_one() {
+        assert_eq!(md("", 25).dependency_distance, None);
+        let parsed =
+            analyze_parsed("", SourceFormat::Markdown, &thresholds(25), &ChainParser).unwrap();
+        assert_eq!(
+            parsed.dependency_distance,
+            Some(DependencyDistance::default())
+        );
+    }
+
+    /// The analysis without anything that only a parse provides.
+    fn surface_only(file: &FileAnalysis) -> FileAnalysis {
+        FileAnalysis {
+            sentences: file
+                .sentences
+                .iter()
+                .map(|s| SentenceAnalysis {
+                    syntax: None,
+                    ..s.clone()
+                })
+                .collect(),
+            dependency_distance: None,
+            ..file.clone()
+        }
     }
 
     fn center_embedding() -> impl Strategy<Value = CenterEmbedding> {
@@ -197,7 +462,7 @@ mod tests {
             })
     }
 
-    fn syntactic_metrics() -> impl Strategy<Value = SyntacticMetrics> {
+    fn any_metrics() -> impl Strategy<Value = SyntacticMetrics> {
         (
             prop_oneof![1 => Just(0usize), 3 => 1usize..30],
             0usize..4,
@@ -225,7 +490,7 @@ mod tests {
 
     /// Metrics with thresholds that equal each metric half the time.
     fn metrics_and_thresholds() -> impl Strategy<Value = (SyntacticMetrics, Thresholds)> {
-        syntactic_metrics().prop_flat_map(|m| {
+        any_metrics().prop_flat_map(|m| {
             let mdd = m.mdd().unwrap_or(1.0);
             let max_mdd = prop_oneof![Just(mdd), 0.5f64..6.0];
             (
@@ -342,6 +607,31 @@ mod tests {
                 _ => None,
             }).collect();
             prop_assert_eq!(embedded, m.center_embeddings.iter().collect::<Vec<_>>());
+        }
+
+        /// Given generated Markdown paragraphs and a parser that chains each sentence's words
+        /// When the file is analyzed with and without the parser
+        /// Then both have the same sentences, positions, counts and surface flags; without it
+        /// nothing is parsed; with it every sentence has the metrics of its text's parse and the
+        /// flags of those metrics, and the file's dependency distance is the sum of the sentences'
+        #[test]
+        fn parsing_adds_syntax_and_changes_nothing_else(doc in document(), max in 0usize..40) {
+            let t = thresholds(max);
+            let plain = analyze(&doc, SourceFormat::Markdown, &t);
+            let parsed = analyze_parsed(&doc, SourceFormat::Markdown, &t, &ChainParser).unwrap();
+            prop_assert_eq!(surface_only(&parsed), plain.clone());
+            prop_assert_eq!(plain.dependency_distance, None);
+            prop_assert!(plain.sentences.iter().all(|s| s.syntax.is_none()));
+            let mut sum = DependencyDistance::default();
+            for s in &parsed.sentences {
+                let syntax = s.syntax.as_ref().expect("every sentence is parsed");
+                let text = &doc[s.source_range.clone()];
+                let tree = DependencyTree::new(ChainParser.parse(text).unwrap()).unwrap();
+                prop_assert_eq!(&syntax.metrics, &syntactic_metrics(&tree));
+                prop_assert_eq!(&syntax.flags, &syntactic_flags(&syntax.metrics, &t));
+                sum = sum + syntax.metrics.distance;
+            }
+            prop_assert_eq!(parsed.dependency_distance, Some(sum));
         }
 
         /// Given generated Markdown paragraphs
