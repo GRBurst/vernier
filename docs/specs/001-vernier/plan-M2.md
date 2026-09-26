@@ -117,7 +117,7 @@ Expected rejections: building a `Block` or `Sentence` outside its module (privat
 - [ ] Map a separator space to the next span's start and stop trimming → P9 or P11 FAIL.
 - [ ] Case-insensitive abbreviation match → `lowercase_no_does_not_merge` FAIL.
 - [ ] `>=` instead of `>` for `LongSentence` → P12 FAIL.
-- [ ] Corrupt 60 rows of the TSV (set count 9) → agreement test FAIL (rate < 90 %); revert.
+- [x] Corrupt 60 rows of the TSV (set count 9) → agreement test FAIL (rate < 90 %); revert.
 - [ ] `check` exits 0 on a flagged sentence → `check_flags_a_long_sentence_and_exits_1` FAIL.
 
 ## Coverage gap (run by hand)
@@ -234,7 +234,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | T0 | spec fix for plain-text line breaks | `spec.md`, `docs/audits/004-…`, this plan | — (docs) | definition corrected | done |
 | T1 | `words()` iterator (refactor) | `src/words.rs` | P1 against a `words` stub yielding nothing | `count_words = words().count()`; existing P6 still green (before/after evidence) | done |
 | T2 | syllable counter | `src/syllables.rs`, `src/lib.rs` | P2, P3 against `fn count_syllables(_) -> usize { 0 }` | port | done |
-| T3 | 500-word reference + measurement | `measurements/{sample_cmudict.py, cmudict-500.tsv, CMUDICT-LICENSE, syllables.md}`, `src/syllables.rs` (test) | agreement test against a TSV with 60 rows corrupted (planted), then real TSV | run generator, record rate and misses | todo |
+| T3 | 500-word reference + measurement | `measurements/{sample_cmudict.py, cmudict-500.tsv, CMUDICT-LICENSE, syllables.md}`, `src/syllables.rs` (test) | agreement test against a TSV with 60 rows corrupted (planted), then real TSV | run generator, record rate and misses | done |
 | T4 | complex word | `src/syllables.rs` | suffix/proper-noun witnesses + P4 against `is_complex = count ≥ 3` | `has_syllabic_suffix`, capitalization | todo |
 | T5 | readability formulas + absence | `src/readability.rs`, `src/lib.rs` | witness, P5, P6, P7 against a stub | formulas, `Add`, `Sum` | todo |
 | T6 | blocks from prose | `src/prose.rs` | `tight_list_items_are_separate_blocks`, `plain_text_blank_lines_separate_blocks`, P8 | `extract_blocks`, `plain_text_blocks`, `blocks`; `extract_prose` = flatten | todo |
