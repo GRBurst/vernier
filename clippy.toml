@@ -1,1 +1,5 @@
 cognitive-complexity-threshold = 10
+# Tests are the shell: unwrap, expect and panic are allowed there (ENGINEERING.md §8).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

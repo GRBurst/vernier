@@ -15,3 +15,10 @@ unsafe_code = "forbid"
 # Elegance gate: a function over the threshold in clippy.toml fails `just verify`.
 cognitive_complexity = "deny"
 all = { level = "deny", priority = -1 }
+# Engineering guide §8 (D10): a typed failure never becomes a crash outside tests.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"

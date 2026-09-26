@@ -2,26 +2,29 @@
 
 ## 1. Preconditions verified
 
-- The starter kit was generated on 2026-09-26 outside this repository. In the source sandbox, `just spec-check`, `just spec-check-test`, `just fmt-check`, `just lint` and `just test` passed; `devenv shell` and the git hooks were **not** run there.
-- Re-verify here first: `devenv shell -- just verify` must print `✓ all gates green`.
+- 2026-09-26, inside the devenv shell of this repository: `just verify` printed `✓ all gates green`, before and after this session's changes.
+- The new lint gates catch what they should: a temporary `unwrap()`, `expect()`, `panic!`, `todo!`, `unimplemented!` and `dbg!` in `src/main.rs` each failed `just lint` with its named clippy lint. The same `unwrap`/`expect`/`panic` inside `#[cfg(test)]` passed (0 errors).
+- Nested `devenv shell -- …` fails in the agent sandbox (`Permission denied`). The session already runs inside the devenv shell (`DEVENV_ROOT` is set), so run `just verify` directly.
 
 ## 2. What exists
 
-- Process documents: `AGENTS.md`, `docs/CONSTITUTION.md`, `docs/PROCESS.md`.
-- Gates: `justfile` (`just verify`), `tools/spec-check/` (spec linter, stdlib Python, with tests), `clippy.toml` (complexity ≤ 10), git hooks in `devenv.nix` (pre-commit runs `just verify`; commit-msg requires a tier).
-- A Cargo skeleton (`src/main.rs` prints the version) so every gate has something to judge.
+- Process documents: `AGENTS.md`, `docs/CONSTITUTION.md` (now D1–D11), `docs/PROCESS.md`, and **new** `docs/ENGINEERING.md`, the binding engineering guide (D10). It covers test first with EARS criteria restated as Given/When/Then, clean code, newtypes, a pure core with I/O in the shell, outcome types, errors (`thiserror` per module, `anyhow` only in `main`), banned constructs, and audits.
+- **New** `docs/audits/` (D11): every corrected mistake gets a numbered file. `001-sandbox-tmp-unreadable.md` is the first.
+- Gates: `justfile` (`just verify`), `tools/spec-check/`, `clippy.toml` (complexity ≤ 10; unwrap/expect/panic allowed in tests), and `Cargo.toml` lints. These now also deny `unwrap_used`, `expect_used`, `panic`, `todo`, `unimplemented` and `dbg_macro`. Git hooks run from `devenv.nix`.
+- A Cargo skeleton (`src/main.rs` prints the version).
 - `docs/specs/001-vernier/spec.md` — **Draft**, not yet reviewed; 13 `[NEEDS CLARIFICATION]` markers, each with a fallback.
 
 ## 3. How to check
 
 ```sh
-devenv shell -- just verify          # ✓ all gates green (13 clarify-open warnings are expected)
-git log --oneline                    # first commit names its tier
+just verify                          # ✓ all gates green (13 clarify-open warnings are expected)
+grep -n 'D10\|D11' docs/CONSTITUTION.md
+grep -n 'unwrap_used' Cargo.toml     # the guide's §8 table names each lint
 ```
 
 ## Open tasks
 
-- Spec 001 phase 2: fresh-context review, then Clarification (answer the 13 markers), Spec-Approval, Comprehension; verdicts go to `docs/specs/001-vernier/gates.md`.
+- Spec 001 phase 2: fresh-context review, then Clarification (answer the 13 markers), Spec-Approval, Comprehension. Verdicts go to `docs/specs/001-vernier/gates.md`.
 
 ## Next action
 
@@ -29,4 +32,5 @@ Run phase 2 on spec 001: spawn a fresh-context reviewer over `docs/specs/001-ver
 
 ## Known-bad approaches
 
-- None yet.
+- Scratch files in `/tmp` inside the agent sandbox; use `.sdd/` (audit 001).
+- Committing from the agent sandbox when commits are GPG-signed: `~/.gnupg` is on nono's deny list, so signing fails. The user commits, or the session gets a grant.
