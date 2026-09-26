@@ -84,6 +84,8 @@ Expected rejections:
 - **P7 ratio:** `ratio()` is `None` ⇔ `words == 0`; otherwise it is `nominalizations / words` and lies in [0, 1] whenever `nominalizations ≤ words`.
 - **P8 heads:** `passive_heads(t)` is strictly ascending, and it equals the set { `head(x)` | x ∈ t, `deprel(x) == "aux:pass"`, `head(x) ≠ 0` }.
 - **P9 alignment:** for any text built from forms f₁…fₙ (`[a-z']{1,6}`) joined by 1–3 spaces, `align` gives `Some(oᵢ)`. The offsets strictly increase, and `text[oᵢ..].starts_with(fᵢ)`. Inserting one form absent from the text gives `None` for it alone; every other offset is unchanged.
+- **P9″ substitution (T4b, audit 009):** substituting one token's form by a form absent from the text gives `None` for it alone; every other offset is unchanged. Precondition, built into the generator: the next form is not a prefix of the substituted token's original form. The unconditioned case is the witness `the_known_limit_of_a_substitution` (`'` `'` over `' ' `, first substituted → `[None, Some(0)]`).
+- **P9‴ no match inside a word (T4b):** a form that occurs in the text only inside words, never at a word start, gets `None`, and every other offset is unchanged.
 - **P10 file = Σ sentences:** `file.nominalizations == Σ sentence.nominalizations`, and `file.nominalizations.words == file.totals.words`, with or without a parse.
 - **P11 absent, not zero:** for every generated document, `analyze(..).passives == None` and `analyze_parsed(.., fake).passives == Some(Σ sentence passives)`.
 - **P12 passive position:** under `analyze_parsed`, every `Passive` has `source_offset ∈ sentence.source_range`. Either `source[offset..].starts_with(verb)`, or `offset == sentence.source_range.start`.
@@ -178,6 +180,9 @@ Expected rejections:
 | 10 | `ratio()` returns `Some(0.0)` for zero words | P7; `empty_file_has_no_nominalization_ratio` | [x] (P7 red in T3; the summary witness is re-planted in T7) |
 | 12 | the possessive strip ignores `’` (U+2019) | P3′ and the `activity’s` / `decisions’` rows (added with audit 008) | [x] (planted twice: bare `’` only → P3′ + `decisions’`; `’s` and `’` → P3′ + both rows) |
 | 11 | P9 generator never inserts an absent form | plant 7′: drop the "cursor unchanged on a miss" rule. It must fail P9 only while the generator inserts; seen green without insertion, red with it (audit 005) | [x] (7′ = a miss advances the cursor by the form's length: P9 red 3/3 with insertion, green 3/3 with the generator fixed to no insertion) |
+| 7″ | `align` matches at the cursor only (the pre-T4b rule, audit 009) | P9″ (substitute branch), the `WAS` witness `a_substituted_form_costs_one_position` | [x] (red 3/3; `never_matches_inside_a_word` red too, by the cascade) |
+| 13 | `align` searches with `find` from the cursor (matches inside a word) | `never_matches_inside_a_word` | [x] (red 3/3; P9 red in 2 of 3) |
+| 11 (T4b re-run) | P9 generator with no edits (neither insert nor substitute) | plant 7′ green without edits, red with them | [x] (red 3/3 with edits, green 3/3 without) |
 
 ## Coverage gap (run by hand)
 
