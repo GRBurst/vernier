@@ -29,27 +29,30 @@ The metric values in this example are illustrative; the criteria below, not the 
 
 - English prose in `.md` and plain-text files; one binary, no Python, JVM or PyTorch at runtime.
 - Two commands: `vernier analyze <FILE>...` (report) and `vernier check <FILE>...` (lint, exit code).
-- Syntactic metrics need a Universal Dependencies model supplied by the user (`--model-path`) or fetched by the tool (M3b).
+- Syntactic metrics need a Universal Dependencies model supplied by the user (`--model-path`, M3b).
 
 **Non-Goals:**
 
 - THE tool SHALL NOT analyze languages other than English in this spec.
 - THE tool SHALL NOT bundle a parser model in the binary or the repository (license open, see M3b).
-- THE tool SHALL NOT rewrite the user's text; suggestions are fixed advice per rule, never generated sentences. [NEEDS CLARIFICATION: your example suggestion quotes a rewritten sentence; generating one needs a language model, which contradicts "no heavy runtime". Fallback: fixed advice text per rule, no generated rewrite.]
+- THE tool SHALL NOT rewrite the user's text; suggestions are fixed advice per rule, never generated sentences.
 - THE tool SHALL NOT read a configuration file in this spec; thresholds come from flags only.
+- THE tool SHALL NOT download a parser model in this spec; a model reaches the tool only through `--model-path`.
 
 **Provenance:**
 
 - Drafted from the user's project description of 2026-09-26 ("Project Specification: Standalone Markdown Cognitive Readability & Syntactic Complexity Analyzer in Rust").
 - Decided by the user on 2026-09-26: the center-embedding distance counts the words strictly between subject and verb (the example's "9" became 8); the parser choice (udpipe vs ONNX via `ort`) stays open until a spike at the start of M3b; the model license is checked before M3b and no model is bundled.
+- Clarified by the user on 2026-09-26 (evidence: [open-questions report](2026-09-26-vernier-open-questions-answered.md), [research/](research/)): suggestions are fixed advice per rule; vernier is for personal, non-commercial use, so the CC BY-NC-SA 4.0 UDPipe 1 English model is acceptable when the user supplies it; no downloader; the parser route is still chosen by the M3b spike. The other ten markers were answered by research and accepted by the user.
 
 ## Definitions
 
 - **Word:** a UAX #29 word segment containing at least one alphabetic or numeric character; punctuation and whitespace segments are not words.
-- **Sentence:** a UAX #29 sentence segment of the extracted prose containing at least one word. [NEEDS CLARIFICATION: the parser also splits sentences; which split is authoritative? Fallback: UAX #29 sentences are the unit, and each one is handed to the parser as one pre-segmented sentence.]
+- **Block prose:** the prose spans of one paragraph (in a list item or blockquote too), joined in source order with one space between consecutive spans; every character keeps its source position. A plain-text file is one block.
+- **Sentence:** a UAX #29 sentence segment of one block's prose containing at least one word, where a segment ending in an abbreviation from the committed list (`Mr.` `Mrs.` `Ms.` `Dr.` `Prof.` `St.` `e.g.` `i.e.` `etc.` `vs.` `Fig.` `No.` `cf.`) is merged with the next segment. This split is authoritative: each sentence goes to the parser pre-segmented, so sentences and positions are the same with or without a model.
 - **Prose span:** a run of text from a `Text` event inside a paragraph, list item or blockquote, with its byte range in the source file.
 - **Position:** 1-based line and 1-based column, the column counted in Unicode scalar values (as rustc does).
-- **Content token:** a parsed token whose `upostag` is not `PUNCT`; content tokens are renumbered 1..N in sentence order before any distance is measured. [NEEDS CLARIFICATION: renumber after dropping punctuation, or keep the parser's ids? Fallback: renumber.]
+- **Content token:** a parsed token whose `upostag` is not `PUNCT`; content tokens are renumbered 1..N in sentence order before any distance is measured; a content token whose head is a `PUNCT` token is re-attached to its nearest non-`PUNCT` ancestor.
 - **Clausal relation:** a `deprel` whose part before any `:` is one of `advcl`, `acl`, `csubj`, `ccomp` (so `acl:relcl` counts).
 
 ## M1 — CLI skeleton and prose extractor (Status: IMPLEMENTED)
@@ -60,7 +63,7 @@ Parse Markdown with `pulldown-cmark`, keep only prose, and map every kept charac
 **Acceptance Criteria:**
 
 - [x] WHEN `extract_prose` receives Markdown, THE extractor SHALL return only text from paragraphs, list items and blockquotes, each span carrying its source byte range.
-- [x] THE extractor SHALL drop fenced and indented code blocks, inline code, HTML blocks and inline HTML, YAML (`---`) and TOML (`+++`) frontmatter, math, tables, headings and image alt text. [NEEDS CLARIFICATION: headings and image alt text are not in your list of kept or dropped content. Fallback: both dropped.]
+- [x] THE extractor SHALL drop fenced and indented code blocks, inline code, HTML blocks and inline HTML, YAML (`---`) and TOML (`+++`) frontmatter, math, tables, headings and image alt text.
 - [x] WHEN a link is extracted, THE extractor SHALL keep its link text and drop its URL; a bare autolink SHALL contribute no text.
 - [x] FOR every returned span, THE slice of the source at its byte range SHALL equal the span text (property test over generated Markdown).
 - [x] WHEN a byte offset is converted to a position, THE converter SHALL return the line and column that a scan of the source up to that offset yields (property test, including multi-byte characters and CRLF line ends).
@@ -71,7 +74,7 @@ Parse Markdown with `pulldown-cmark`, keep only prose, and map every kept charac
 **Implementation Details:**
 
 - `pulldown-cmark` options: tables, math, YAML and TOML metadata blocks enabled so they can be recognised and dropped; use `into_offset_iter()` for byte ranges.
-- Plain-text files (not `.md`) are one prose span each. [NEEDS CLARIFICATION: detect plain text by extension? Fallback: `.md` and `.markdown` are Markdown, anything else is plain text.]
+- Plain-text files are one prose span each; `.md` and `.markdown` (any letter case) are Markdown, anything else is plain text.
 
 ## M2 — Surface readability engine (Status: PLANNED)
 <a id="M2"></a>
@@ -84,15 +87,15 @@ Count words, sentences and syllables, and compute FRE, FKGL, Gunning Fog and ave
 - [ ] WHEN the counts are 100 words, 5 sentences and 150 syllables, THE engine SHALL return FRE 59.635 and FKGL 9.91 within 1e-9.
 - [ ] FOR fixed words and sentences, THE engine SHALL return a strictly lower FRE and a strictly higher FKGL when syllables increase (property test).
 - [ ] WHEN a text has zero words or zero sentences, THE engine SHALL report the metrics as absent rather than dividing by zero.
-- [ ] THE syllable counter SHALL return at least 1 for every word containing a letter.
-- [ ] THE syllable counter SHALL agree with a committed reference list of English words and syllable counts on a share of words the reference measurement records. [NEEDS CLARIFICATION: which reference (e.g. a CMUdict sample) and which agreement is enough? Fallback: 500 words sampled from CMUdict, agreement at least 90 %, measured and committed under `docs/specs/001-vernier/measurements/`.]
-- [ ] THE engine SHALL count a word as complex when it has 3 or more syllables after removing a final `-ed`, `-es` or `-ing`, and is not capitalized in a non-sentence-initial position. [NEEDS CLARIFICATION: "common proper nouns" has no list. Fallback: the capitalization rule stated here stands in for it.]
+- [ ] THE syllable counter SHALL return at least 1 for every word containing a letter, and exactly 1 for a word of digits only.
+- [ ] THE syllable counter SHALL agree on at least 90 % of a committed reference list of 500 frequent English words sampled from CMUdict (keeping CMU's license notice), measured and committed under `docs/specs/001-vernier/measurements/`.
+- [ ] THE engine SHALL count a word as complex when it has 3 or more syllables after subtracting one for a final suffix that is itself a syllable (`-ing`; `-ed` after `t` or `d`; `-es` after `s`, `x`, `z`, `ch`, `sh`, `ce` or `ge`), and is not capitalized in a non-sentence-initial position (Gunning's rule for proper nouns).
 - [ ] WHEN a sentence has more than `--max-sentence-len` words (default 25), THE engine SHALL flag it as `LongSentence`.
 
 **Implementation Details:**
 
 - Word and sentence boundaries from `unicode-segmentation`.
-- Syllables: a rule-based counter first; `hyphenation` (Liang) only if it measures better, because hyphenation points undercount syllables near word edges.
+- Syllables: a rule-based counter. Liang hyphenation is not used: it scored 63.0 % against the rule-based 93.8 % on 500 frequent CMUdict words ([research/metrics.md](research/metrics.md)).
 
 ## M3a — Syntactic metrics on a token graph (Status: PLANNED)
 <a id="M3a"></a>
@@ -102,9 +105,9 @@ Compute the dependency metrics as pure functions over a list of tokens, tested o
 **Acceptance Criteria:**
 
 - [ ] THE crate SHALL define `Token { id, form, lemma, upostag, head, deprel }` and a `Parser` trait returning the tokens of one sentence, so that the metrics depend on no parser implementation.
-- [ ] THE MDD function SHALL return the sum of |i − head(i)| over the N − 1 non-root content tokens, divided by N − 1.
+- [ ] THE MDD function SHALL return the sum of |i − head(i)| over the N − 1 non-root content tokens, divided by N − 1; the file-level MDD SHALL be the total distance over all sentences divided by (content tokens − sentences).
 - [ ] WHEN a sentence has fewer than 2 content tokens, THE MDD function SHALL report MDD as absent.
-- [ ] THE depth function SHALL return the largest number of edges on a path from the root to any token (a root-only sentence has depth 0). [NEEDS CLARIFICATION: count edges (root = 0) or nodes (root = 1)? Fallback: edges.]
+- [ ] THE depth function SHALL return the largest number of edges on a path from the root to any token (a root-only sentence has depth 0); the `--max-tree-depth` help text SHALL say that depth counts edges.
 - [ ] THE clause counter SHALL return the number of tokens whose `deprel` is a clausal relation.
 - [ ] WHEN a clausal dependent's subtree lies wholly between a nominal subject (`nsubj`, `nsubj:pass`) and the subject's head verb, THE detector SHALL report center-embedding with the subject, the verb and the number of words strictly between them.
 - [ ] WHEN the hand-built UD parse of "The proposal, which the executive committee rejected after extensive deliberation, caused significant delays." is given, THE detector SHALL report subject "proposal", verb "caused" and distance 8.
@@ -120,20 +123,20 @@ Put a real Universal Dependencies parser behind the `Parser` trait, after a shor
 **Acceptance Criteria:**
 
 - [ ] BEFORE any parser code lands, THE milestone SHALL commit a spike report comparing the `udpipe` route and the ONNX-via-`ort` route on build inside devenv, binary size, per-sentence time on a committed sample, and output on the M3a example sentence; the user chooses the route from that report.
-- [ ] BEFORE model download or loading code lands, THE milestone SHALL record the license of the chosen model in the README and in this spec; the tool SHALL download or load it only where that license permits the user's intended use. [NEEDS CLARIFICATION: the standard UDPipe UD 2.5 models are believed to be CC BY-NC-SA, not verified. Fallback: the user supplies the model; the tool never redistributes it.]
+- [ ] BEFORE model download or loading code lands, THE milestone SHALL record the license of the chosen model in the README and in this spec; the tool SHALL load it only where that license permits the user's intended use (personal, non-commercial; the UDPipe 1 English EWT model is CC BY-NC-SA 4.0), and SHALL never redistribute it.
 - [ ] WHEN `--model-path` names a readable model, THE tool SHALL parse each sentence and compute the M3a metrics from the result.
 - [ ] WHEN the parsed M3a example sentence is analyzed, THE tool SHALL report center-embedding with subject "proposal" and verb "caused" (integration test, skipped with a printed reason when no model is present).
-- [ ] WHEN no model is available, THE tool SHALL compute the surface metrics, print one notice on stderr that the syntactic metrics were skipped, and judge the exit code on surface rules only. [NEEDS CLARIFICATION: in CI this silently weakens `check`. Fallback as stated; alternative: exit 2 unless a `--surface-only` flag is given.]
-- [ ] WHERE the downloader is enabled, THE tool SHALL store the model under `$XDG_CACHE_HOME/vernier/` (or `~/.cache/vernier/`), verify a pinned checksum, and never download during `check`. [NEEDS CLARIFICATION: is a downloader wanted at all, given the license question? Fallback: a separate `vernier model fetch` command.]
+- [ ] WHEN no `--model-path` is given, THE tool SHALL compute the surface metrics, print one notice on stderr that the syntactic metrics were skipped, and judge the exit code on surface rules only.
+- [ ] WHEN `--model-path` names a missing or unusable model, THE tool SHALL name it on stderr and exit 2.
 
 ## M4 — Nominalization and passive voice (Status: PLANNED)
 <a id="M4"></a>
 
-Count abstract deverbal nouns and passive constructions.
+Count nominalizations (nouns derived from verbs or adjectives) and passive constructions.
 
 **Acceptance Criteria:**
 
-- [ ] THE engine SHALL count as a nominalization a word ending in `-tion`, `-sion`, `-ment`, `-ance`, `-ence` or `-ity` that is at least 7 letters long, is tagged `NOUN` when a parse exists, and is not on a committed stoplist. [NEEDS CLARIFICATION: the suffix test alone matches words like "nation" or "city". Fallback: length ≥ 7, NOUN tag and a stoplist in `data/nominalization-stoplist.txt`.]
+- [ ] THE engine SHALL count as a nominalization a word whose lemma (without a parse: the word with a plural `-s` removed) ends in `-tion`, `-sion`, `-ment`, `-ance`, `-ence` or `-ity`, is at least 7 letters long, is tagged `NOUN` when a parse exists, and is not on the committed stoplist `data/nominalization-stoplist.txt` (seeded from pybiber, MIT, keeping its notice).
 - [ ] THE engine SHALL report per sentence and per file the nominalization ratio = nominalizations / words.
 - [ ] WHEN a parse contains a token with `deprel` `aux:pass`, THE engine SHALL report its head verb as a passive construction with its position.
 - [ ] WHEN no parse exists, THE engine SHALL report passive voice as absent, not as zero.
@@ -145,7 +148,7 @@ Render findings like compiler diagnostics, add JSON and compact output, and make
 
 **Acceptance Criteria:**
 
-- [ ] WHEN a sentence carries at least one flag, THE `check` command SHALL print one `warning[CognitiveOverload]` diagnostic for it, pointing at the sentence's first character, underlining the sentence, and listing every metric with the flags it raised. [NEEDS CLARIFICATION: one diagnostic per sentence, or one per rule (`LongSentence`, `HighMdd`, ...)? Fallback: one per sentence, as in your example.]
+- [ ] WHEN a sentence carries at least one flag, THE `check` command SHALL print one `warning[CognitiveOverload]` diagnostic for it, pointing at the sentence's first character, underlining the sentence, and listing every metric with the flags it raised.
 - [ ] THE `check` command SHALL exit 0 when no sentence is flagged, 1 when at least one is, and 2 on an unreadable file or an unusable model.
 - [ ] WHEN `--format json` is given, THE tool SHALL print one JSON document with `schema_version` 1, per-file metrics and a diagnostics array whose positions equal those of the text format.
 - [ ] WHEN `--format compact` is given, THE tool SHALL print one line per diagnostic as `path:line:col: code: message`.
