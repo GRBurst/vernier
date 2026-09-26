@@ -1,8 +1,10 @@
-{pkgs, ...}: {
+{pkgs, config, ...}: {
   # Pinned environment: every gate runs in here with zero host tools (B8).
   # `devenv shell` creates devenv.lock on first run; commit it.
 
   env.RUST_BACKTRACE = "1";
+  # Project-local crate registry: the global ~/.cargo is never written (B4, audit 002).
+  env.CARGO_HOME = "${config.env.DEVENV_STATE}/cargo";
 
   languages.rust.enable = true; # rustc, cargo, clippy, rustfmt
 
