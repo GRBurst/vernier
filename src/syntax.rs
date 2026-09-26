@@ -76,6 +76,24 @@ pub fn depth(tree: &DependencyTree) -> usize {
         .unwrap_or(0)
 }
 
+/// The number of content tokens whose `deprel` is a clausal relation.
+pub fn clause_count(tree: &DependencyTree) -> usize {
+    content_tree(tree)
+        .tokens
+        .iter()
+        .filter(|c| is_clausal(&c.token.deprel))
+        .count()
+}
+
+/// Whether `deprel` is a clausal relation (spec 001, *Clausal relation*): its part before any
+/// `:` is exactly `advcl`, `acl`, `csubj` or `ccomp`.
+pub fn is_clausal(deprel: &str) -> bool {
+    matches!(
+        deprel.split(':').next(),
+        Some("advcl" | "acl" | "csubj" | "ccomp")
+    )
+}
+
 impl ContentTree<'_> {
     /// The number of edges from content token `id` up to its projected root.
     fn edges_to_root(&self, id: usize) -> usize {
@@ -234,6 +252,33 @@ mod tests {
         }
     }
 
+    /// Given the UDPipe 2 parse of the M3a example sentence
+    /// When its clauses are counted
+    /// Then there is 1 (`rejected`, `acl:relcl`)
+    #[test]
+    fn example_sentence_has_one_clause() {
+        assert_eq!(clause_count(&tree(tokens_from_conllu(EXAMPLE_CONLLU))), 1);
+    }
+
+    /// Given relations whose base is not one of the four clausal ones, or merely resembles one
+    /// When they are classified
+    /// Then none is clausal
+    #[test]
+    fn non_clausal_relations_are_not_clausal() {
+        for deprel in [
+            "xcomp",
+            "advmod",
+            "obj",
+            "nsubj",
+            "obl",
+            "aclx",
+            "nsubj:pass",
+            "punct",
+        ] {
+            assert!(!is_clausal(deprel), "{deprel}");
+        }
+    }
+
     fn distance_counts() -> impl Strategy<Value = DependencyDistance> {
         (prop_oneof![1 => Just(0usize), 3 => 1usize..100], 0usize..10).prop_map(
             |(dependencies, extra)| DependencyDistance {
@@ -361,6 +406,33 @@ mod tests {
         #[test]
         fn chain_depth_is_one_less_than_its_length(n in 1usize..40) {
             prop_assert_eq!(depth(&chain(n)), n - 1);
+        }
+
+        /// Given each clausal base relation, bare and with any subtype
+        /// When it is classified
+        /// Then it is clausal
+        #[test]
+        fn clausal_bases_are_clausal_with_any_subtype(
+            base in prop::sample::select(vec!["advcl", "acl", "csubj", "ccomp"]),
+            subtype in "[a-z]{1,8}",
+        ) {
+            prop_assert!(is_clausal(base));
+            let with_subtype = format!("{base}:{subtype}");
+            prop_assert!(is_clausal(&with_subtype), "{}", with_subtype);
+        }
+
+        /// Given any well-formed tree
+        /// When its clauses are counted
+        /// Then the count is the number of content tokens whose deprel is one of the generator's
+        /// clausal relations (advcl, acl, acl:relcl, ccomp, csubj)
+        #[test]
+        fn clause_count_counts_content_tokens_with_a_clausal_relation(tokens in well_formed_tree()) {
+            let clausal = ["advcl", "acl", "acl:relcl", "ccomp", "csubj"];
+            let expected = tokens
+                .iter()
+                .filter(|t| !t.is_punct() && clausal.contains(&t.deprel.as_str()))
+                .count();
+            prop_assert_eq!(clause_count(&tree(tokens)), expected);
         }
 
         /// Given any three dependency distances
