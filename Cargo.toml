@@ -1,0 +1,17 @@
+[package]
+name = "vernier"
+version = "0.1.0"
+edition = "2024"
+description = "Readability and syntactic-complexity analyzer for Markdown"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# Elegance gate: a function over the threshold in clippy.toml fails `just verify`.
+cognitive_complexity = "deny"
+all = { level = "deny", priority = -1 }

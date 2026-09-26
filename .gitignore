@@ -1,0 +1,11 @@
+/target
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+.direnv
+__pycache__/
+.pre-commit-config.yaml
+# Untracked runtime state; nothing load-bearing goes here.
+.sdd/
+# UD models are downloaded, never committed (license: see README).
+/models/
