@@ -112,7 +112,7 @@ Expected rejections: building a `Block` or `Sentence` outside its module (privat
 - [x] Subtract the suffix for `jumped` (`-ed` after any letter) → `non_syllabic_suffix_is_not` FAIL.
 - [x] `84.6` → `84.0` in FRE → witness FAIL.
 - [x] Return `Some` with `NaN` for zero sentences → P6 FAIL (after P6's generator was biased to zero counts; before, only `zero_words_or_sentences_are_absent` caught it).
-- [ ] Block boundary only at `Paragraph` → `tight_list_items_are_separate_blocks` FAIL.
+- [x] Block boundary only at `Paragraph` → `tight_list_items_are_separate_blocks` FAIL.
 - [ ] Skip the `\n → ' '` mapping → `sentence::tests::hard_wrapped_plain_text_is_one_sentence` FAIL.
 - [ ] Map a separator space to the next span's start and stop trimming → P9 or P11 FAIL.
 - [ ] Case-insensitive abbreviation match → `lowercase_no_does_not_merge` FAIL.
@@ -237,7 +237,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | T3 | 500-word reference + measurement | `measurements/{sample_cmudict.py, cmudict-500.tsv, CMUDICT-LICENSE, syllables.md}`, `src/syllables.rs` (test) | agreement test against a TSV with 60 rows corrupted (planted), then real TSV | run generator, record rate and misses | done |
 | T4 | complex word | `src/syllables.rs` | suffix/proper-noun witnesses + P4 against `is_complex = count ≥ 3` | `has_syllabic_suffix`, capitalization | done |
 | T5 | readability formulas + absence | `src/readability.rs`, `src/lib.rs` | witness, P5, P6, P7 against a stub | formulas, `Add`, `Sum` | done |
-| T6 | blocks from prose | `src/prose.rs` | `tight_list_items_are_separate_blocks`, `plain_text_blank_lines_separate_blocks`, P8 | `extract_blocks`, `plain_text_blocks`, `blocks`; `extract_prose` = flatten | todo |
+| T6 | blocks from prose | `src/prose.rs` | `tight_list_items_are_separate_blocks`, `plain_text_blank_lines_separate_blocks`, P8 | `extract_blocks`, `plain_text_blocks`, `blocks`; `extract_prose` = flatten | done |
 | T7 | block join + offset map | `src/block.rs`, `src/lib.rs` | P9 against identity map | `Block` | todo |
 | T8 | sentence splitting | `src/sentence.rs`, `src/lib.rs` | spike cases, abbreviation laws, P10, P11 against one-sentence-per-block | UAX #29 + merge + trim | todo |
 | T9 | analysis + `LongSentence` | `src/analysis.rs`, `src/lib.rs` | P12, `empty_file_has_absent_metrics` | `analyze` | todo |

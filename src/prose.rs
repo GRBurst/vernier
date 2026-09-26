@@ -59,6 +59,43 @@ pub fn prose(source: &str, format: SourceFormat) -> Vec<ProseSpan<'_>> {
     }
 }
 
+/// The prose blocks of `source`, read as `format`: each block the spans of one paragraph, list
+/// item or blockquote line run (Markdown), or of one run of non-blank lines (plain text).
+pub fn blocks(source: &str, format: SourceFormat) -> Vec<Vec<ProseSpan<'_>>> {
+    match format {
+        SourceFormat::Markdown => extract_blocks(source),
+        SourceFormat::PlainText => plain_text_blocks(source),
+    }
+}
+
+/// The blocks of a plain-text file: maximal runs of non-blank lines, one span each, without the
+/// final line break.
+pub fn plain_text_blocks(text: &str) -> Vec<Vec<ProseSpan<'_>>> {
+    let (mut runs, mut run, mut start): (Vec<Range<usize>>, Option<Range<usize>>, usize) =
+        (Vec::new(), None, 0);
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        let range = start..start + content.len();
+        start += line.len();
+        if content.trim().is_empty() {
+            runs.extend(run.take());
+        } else {
+            run = Some(run.map_or(range.clone(), |open| open.start..range.end));
+        }
+    }
+    runs.extend(run);
+    // Every range starts after a '\n' and ends before a '\r' or '\n', so it lies on char boundaries.
+    runs.into_iter()
+        .filter_map(|range| {
+            Some(vec![ProseSpan {
+                text: text.get(range.clone())?,
+                range,
+            }])
+        })
+        .collect()
+}
+
 /// A plain-text file is one prose span covering the whole file.
 pub fn plain_text_prose(text: &str) -> Vec<ProseSpan<'_>> {
     vec![ProseSpan {
@@ -126,25 +163,101 @@ fn role(tag: &Tag<'_>) -> Role {
 }
 
 /// Text is prose inside some prose element and no dropped one.
-fn keeps(open: &[Role]) -> bool {
-    open.contains(&Role::Prose) && !open.contains(&Role::Dropped)
+fn keeps(open: &[Open]) -> bool {
+    open.iter().any(|e| e.role == Role::Prose) && !open.iter().any(|e| e.role == Role::Dropped)
+}
+
+/// The prose blocks of a Markdown document, in source order.
+///
+/// Every start or end of a block-level element closes the current block, so tight list items
+/// (which hold no paragraph) and nested lists split where a reader sees a new block.
+pub fn extract_blocks(markdown: &str) -> Vec<Vec<ProseSpan<'_>>> {
+    let mut open: Vec<Open> = Vec::new();
+    let mut blocks = Blocks::default();
+    for (event, range) in Parser::new_ext(markdown, options()).into_offset_iter() {
+        match event {
+            Event::Start(tag) => {
+                let element = Open {
+                    role: role(&tag),
+                    is_inline: is_inline(&tag),
+                };
+                blocks.close_unless(element.is_inline);
+                open.push(element);
+            }
+            Event::End(_) => {
+                let element = open.pop();
+                blocks.close_unless(element.is_some_and(|e| e.is_inline));
+            }
+            Event::Text(text) if keeps(&open) => blocks.push(span_at(markdown, &text, range)),
+            _ => {}
+        }
+    }
+    blocks.finish()
 }
 
 /// The prose spans of a Markdown document, in source order.
 pub fn extract_prose(markdown: &str) -> Vec<ProseSpan<'_>> {
-    let mut open: Vec<Role> = Vec::new();
-    let mut spans = Vec::new();
-    for (event, range) in Parser::new_ext(markdown, options()).into_offset_iter() {
-        match event {
-            Event::Start(tag) => open.push(role(&tag)),
-            Event::End(_) => {
-                open.pop();
-            }
-            Event::Text(text) if keeps(&open) => spans.extend(span_at(markdown, &text, range)),
-            _ => {}
+    extract_blocks(markdown).into_iter().flatten().collect()
+}
+
+/// An open Markdown element: what it does to its text, and whether it splits blocks.
+#[derive(Debug, Clone, Copy)]
+struct Open {
+    role: Role,
+    is_inline: bool,
+}
+
+/// The finished blocks and the one being filled; no block is ever empty.
+#[derive(Debug, Default)]
+struct Blocks<'a> {
+    done: Vec<Vec<ProseSpan<'a>>>,
+    current: Vec<ProseSpan<'a>>,
+}
+
+impl<'a> Blocks<'a> {
+    fn push(&mut self, span: Option<ProseSpan<'a>>) {
+        self.current.extend(span);
+    }
+
+    fn close_unless(&mut self, is_inline: bool) {
+        if !is_inline && !self.current.is_empty() {
+            self.done.push(std::mem::take(&mut self.current));
         }
     }
-    spans
+
+    fn finish(mut self) -> Vec<Vec<ProseSpan<'a>>> {
+        self.close_unless(false);
+        self.done
+    }
+}
+
+// why: matched exhaustively, so a new pulldown-cmark tag breaks the build until it is placed.
+fn is_inline(tag: &Tag<'_>) -> bool {
+    match tag {
+        Tag::Emphasis
+        | Tag::Strong
+        | Tag::Strikethrough
+        | Tag::Link { .. }
+        | Tag::Image { .. }
+        | Tag::Superscript
+        | Tag::Subscript => true,
+        Tag::Paragraph
+        | Tag::Heading { .. }
+        | Tag::BlockQuote(_)
+        | Tag::CodeBlock(_)
+        | Tag::HtmlBlock
+        | Tag::List(_)
+        | Tag::Item
+        | Tag::FootnoteDefinition(_)
+        | Tag::DefinitionList
+        | Tag::DefinitionListTitle
+        | Tag::DefinitionListDefinition
+        | Tag::Table(_)
+        | Tag::TableHead
+        | Tag::TableRow
+        | Tag::TableCell
+        | Tag::MetadataBlock(_) => false,
+    }
 }
 
 /// The span at `range`, if the parsed text is exactly the source there.
@@ -223,6 +336,75 @@ mod tests {
             extract_prose(md)
                 .iter()
                 .all(|s| md.get(s.range()) == Some(s.text()))
+        );
+    }
+
+    fn block_texts(markdown: &str) -> Vec<Vec<&str>> {
+        extract_blocks(markdown)
+            .iter()
+            .map(|block| block.iter().map(ProseSpan::text).collect())
+            .collect()
+    }
+
+    /// Given a tight list, whose items hold no paragraph
+    /// When blocks are extracted
+    /// Then each item is its own block
+    #[test]
+    fn tight_list_items_are_separate_blocks() {
+        assert_eq!(
+            block_texts("- one item\n- two *items*\n"),
+            [vec!["one item"], vec!["two ", "items"]]
+        );
+    }
+
+    /// Given a list item holding a nested list
+    /// When blocks are extracted
+    /// Then the parent's text, the nested item and the next item are three blocks
+    #[test]
+    fn nested_list_is_its_own_block() {
+        assert_eq!(
+            block_texts("- parent text\n  - child text\n- next\n"),
+            [vec!["parent text"], vec!["child text"], vec!["next"]]
+        );
+    }
+
+    /// Given a paragraph with inline markup and line breaks, then a blockquote
+    /// When blocks are extracted
+    /// Then inline markup and line breaks split no block, and the blockquote is its own block
+    #[test]
+    fn inline_markup_splits_no_block() {
+        assert_eq!(
+            block_texts(
+                "See *this* and [that](https://x.example)\nwrapped.\n\n> quoted\n> lines\n"
+            ),
+            [
+                vec!["See ", "this", " and ", "that", "wrapped."],
+                vec!["quoted", "lines"]
+            ]
+        );
+    }
+
+    /// Given plain text with hard-wrapped lines, a whitespace-only line and CRLF line ends
+    /// When its blocks are taken
+    /// Then blank lines separate blocks, each one span without its final line break
+    #[test]
+    fn plain_text_blank_lines_separate_blocks() {
+        let text = "a line\r\nwrapped here\r\n\r\n \t\n\nnext block\n";
+        let blocks = plain_text_blocks(text);
+        let texts: Vec<Vec<&str>> = blocks
+            .iter()
+            .map(|b| b.iter().map(ProseSpan::text).collect())
+            .collect();
+        assert_eq!(texts, [vec!["a line\r\nwrapped here"], vec!["next block"]]);
+        assert!(
+            blocks
+                .iter()
+                .flatten()
+                .all(|s| text.get(s.range()) == Some(s.text()))
+        );
+        assert_eq!(
+            plain_text_blocks(" \n\t\n"),
+            Vec::<Vec<ProseSpan<'_>>>::new()
         );
     }
 
@@ -456,6 +638,35 @@ mod tests {
             fn every_span_is_its_source_slice(doc in doc()) {
                 for span in extract_prose(&doc.markdown) {
                     prop_assert_eq!(doc.markdown.get(span.range()), Some(span.text()));
+                }
+            }
+
+            /// Given generated Markdown
+            /// When its blocks are extracted
+            /// Then no block is empty and, flattened, they are exactly the extracted prose spans
+            #[test]
+            fn blocks_flatten_to_the_prose_spans(doc in doc()) {
+                let blocks = extract_blocks(&doc.markdown);
+                prop_assert!(blocks.iter().all(|b| !b.is_empty()), "{:?}", doc.markdown);
+                prop_assert_eq!(blocks.concat(), extract_prose(&doc.markdown));
+            }
+
+            /// Given generated plain text of non-blank lines separated by blank ones, LF or CRLF
+            /// When its blocks are taken
+            /// Then there is one single-span block per run of lines, each span its source slice
+            #[test]
+            fn plain_text_has_one_block_per_line_run(
+                runs in prop::collection::vec(prop::collection::vec("[a-z][a-z .]{0,10}", 1..4), 0..5),
+                crlf in any::<bool>(),
+            ) {
+                let eol = if crlf { "\r\n" } else { "\n" };
+                let text = runs.iter().map(|r| r.join(eol)).collect::<Vec<_>>().join(&format!("{eol} {eol}"));
+                let blocks = plain_text_blocks(&text);
+                prop_assert_eq!(blocks.len(), runs.len());
+                for (block, run) in blocks.iter().zip(&runs) {
+                    prop_assert_eq!(block.len(), 1);
+                    prop_assert_eq!(block[0].text(), run.join(eol));
+                    prop_assert_eq!(text.get(block[0].range()), Some(block[0].text()));
                 }
             }
 
