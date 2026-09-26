@@ -127,8 +127,8 @@ Each names the concrete input where the mutant differs (audit 005).
 - [x] File MDD as the mean of sentence MDDs → `file_mdd_pools_distances_not_means` FAIL (1.5 ≠ 1.75). Planted in `DependencyDistance::sum` (the only place a file MDD is formed): the sum of the parts' means over the number of parts; each sentence's own sum is over parts of 1 dependency, where both agree, so only the pooling test and P8 failed.
 - [x] Depth counts nodes (root = 1) → P9 root-only FAIL.
 - [x] `is_clausal` as `deprel.ends_with("comp") || …` → P10 `xcomp` FAIL.
-- [ ] `words_between` = `v − s − 1` over original ids → example witness FAIL (10 ≠ 8).
-- [ ] Drop the `hi < v` check → P12 crossing case FAIL (reported).
+- [x] `words_between` = `v − s − 1` over original ids → example witness FAIL (10 ≠ 8).
+- [x] Drop the `hi < v` check → P12 crossing case FAIL (reported).
 - [ ] `>=` for `HighMdd` → P13 FAIL (chain, `mdd = 1.0 = max_mdd`; ensure the generator of P13 hits equality: draw `max_mdd` from the metric itself half the time).
 - [ ] `analyze_parsed` parses `&source[range]` → `analysis::tests::parses_the_prose_not_the_markup` FAIL (`**The proposal**, which …` — the fixture parser knows only the prose text and returns an error for anything else).
 - [ ] `analyze_parsed` drops `LongSentence` from parsed sentences → P14 FAIL (needs a document with a sentence over the threshold: `document()` with `max` from 0..40 reaches it).
@@ -281,7 +281,7 @@ This plan's ticks go in a separate commit when a task would exceed 5 files.
 | T3 | MDD + file MDD | `src/syntax.rs` | example 32/12, `single_word_sentence_has_no_mdd`, P6, P7, P8, `file_mdd_pools_distances_not_means` against `total = 0` | `DependencyDistance`, `dependency_distance` | done |
 | T4 | depth | `src/syntax.rs` | example 4, P9 against `depth = 0` | `depth` | done |
 | T5 | clause count | `src/syntax.rs` | P10, example 1 against `is_clausal = false` | `is_clausal`, `clause_count` | done |
-| T6 | center-embedding | `src/syntax.rs` | example witness, P11, P12 against `vec![]` | `center_embeddings`, `words_between`; then `SyntacticMetrics` + P5 | todo |
+| T6 | center-embedding | `src/syntax.rs` | example witness, P11, P12 against `vec![]` | `center_embeddings`, `words_between`; then `SyntacticMetrics` + P5 | done |
 | T7 | `--max-tree-depth` help says edges | `src/cli.rs` | `max_tree_depth_help_says_edges` | doc comment | todo |
 | T8 | syntactic flags + thresholds | `src/analysis.rs`, `src/main.rs` | P13 against `syntactic_flags = vec![]`; `describe_syntactic` message tests in `main.rs` | `Thresholds` fields, `SyntacticFlag`, `syntactic_flags`, `SentenceSyntax`, `syntax: None` everywhere, `main` builds full `Thresholds` and renders syntactic flags | todo |
 | T9 | engine with a parser | `src/analysis.rs` | P14, `example_is_center_embedded_and_high_mdd_only_below_8_3`, `parses_the_prose_not_the_markup`, parser/malformed errors against `analyze_parsed` = `Ok(analyze(..))` | `analyze_with`, `analyze_parsed`, `AnalysisError`, `dependency_distance` | todo |

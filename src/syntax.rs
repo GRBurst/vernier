@@ -39,6 +39,32 @@ impl Sum for DependencyDistance {
     }
 }
 
+/// Every syntactic metric of one sentence, computed on its content projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyntacticMetrics {
+    pub distance: DependencyDistance,
+    pub depth: usize,
+    pub clauses: usize,
+    pub center_embeddings: Vec<CenterEmbedding>,
+}
+
+impl SyntacticMetrics {
+    /// The sentence's mean dependency distance, absent below one dependency.
+    pub fn mdd(&self) -> Option<f64> {
+        self.distance.mean()
+    }
+}
+
+/// The metrics of `tree`.
+pub fn syntactic_metrics(tree: &DependencyTree) -> SyntacticMetrics {
+    SyntacticMetrics {
+        distance: dependency_distance(tree),
+        depth: depth(tree),
+        clauses: clause_count(tree),
+        center_embeddings: center_embeddings(tree),
+    }
+}
+
 /// The distance between every content token and its content head, over the content projection.
 pub fn dependency_distance(tree: &DependencyTree) -> DependencyDistance {
     content_tree(tree)
@@ -94,14 +120,87 @@ pub fn is_clausal(deprel: &str) -> bool {
     )
 }
 
+/// A clausal subtree lying wholly between a nominal subject and its head verb.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CenterEmbedding {
+    pub subject: String,
+    pub verb: String,
+    /// The words strictly between subject and verb in the original sentence (punctuation and
+    /// symbols are not words).
+    pub words_between: usize,
+}
+
+/// One report per nominal subject (`nsubj`, `nsubj:pass`) that precedes its head verb with a
+/// clausal subtree lying strictly between them.
+pub fn center_embeddings(tree: &DependencyTree) -> Vec<CenterEmbedding> {
+    let projection = content_tree(tree);
+    embedded_pairs(&projection)
+        .into_iter()
+        .map(|(s, v)| {
+            let (subject, verb) = (
+                projection.tokens[s - 1].token,
+                projection.tokens[v - 1].token,
+            );
+            CenterEmbedding {
+                subject: subject.form.clone(),
+                verb: verb.form.clone(),
+                words_between: words_between(tree, subject.id, verb.id),
+            }
+        })
+        .collect()
+}
+
+/// The (subject, verb) content ids of every center-embedding.
+fn embedded_pairs(projection: &ContentTree<'_>) -> Vec<(usize, usize)> {
+    let clause_spans: Vec<(usize, usize)> = projection
+        .spans()
+        .into_iter()
+        .zip(&projection.tokens)
+        .filter(|(_, c)| is_clausal(&c.token.deprel))
+        .map(|(span, _)| span)
+        .collect();
+    projection
+        .dependencies()
+        .filter(|&(s, v)| s < v && is_nominal_subject(&projection.tokens[s - 1].token.deprel))
+        .filter(|&(s, v)| clause_spans.iter().any(|&(lo, hi)| s < lo && hi < v))
+        .collect()
+}
+
+fn is_nominal_subject(deprel: &str) -> bool {
+    matches!(deprel, "nsubj" | "nsubj:pass")
+}
+
+/// The original tokens strictly between ids `from` and `to` whose form holds a letter or digit.
+fn words_between(tree: &DependencyTree, from: usize, to: usize) -> usize {
+    tree.tokens()
+        .iter()
+        .filter(|t| from < t.id && t.id < to)
+        .filter(|t| t.form.chars().any(char::is_alphanumeric))
+        .count()
+}
+
 impl ContentTree<'_> {
     /// The number of edges from content token `id` up to its projected root.
     fn edges_to_root(&self, id: usize) -> usize {
-        std::iter::successors(Some(id), |&k| {
-            Some(self.tokens[k - 1].head).filter(|&h| h != 0)
-        })
-        .skip(1)
-        .count()
+        self.ancestors(id).count()
+    }
+
+    /// The content ids above `id`, nearest first, up to its projected root.
+    fn ancestors(&self, id: usize) -> impl Iterator<Item = usize> + '_ {
+        let head_of = |k: usize| Some(self.tokens[k - 1].head).filter(|&h| h != 0);
+        std::iter::successors(head_of(id), move |&k| head_of(k))
+    }
+
+    /// For each content id, the smallest and largest content id in its subtree.
+    fn spans(&self) -> Vec<(usize, usize)> {
+        let mut spans: Vec<(usize, usize)> = (1..=self.tokens.len()).map(|k| (k, k)).collect();
+        for k in 1..=self.tokens.len() {
+            for a in self.ancestors(k) {
+                let (lo, hi) = spans[a - 1];
+                spans[a - 1] = (lo.min(k), hi.max(k));
+            }
+        }
+        spans
     }
 
     /// Every (content id, content head) pair whose head is not the root.
@@ -279,6 +378,71 @@ mod tests {
         }
     }
 
+    /// Given a sentence whose subject and verb are 8 words apart
+    /// When center-embedding is detected
+    /// Then the detector reports subject "proposal", verb "caused", distance 8
+    #[test]
+    fn reports_the_subject_verb_gap_of_a_center_embedded_sentence() {
+        let expected = CenterEmbedding {
+            subject: "proposal".to_owned(),
+            verb: "caused".to_owned(),
+            words_between: 8,
+        };
+        let found = center_embeddings(&tree(tokens_from_conllu(EXAMPLE_CONLLU)));
+        assert_eq!(found, [expected]);
+    }
+
+    /// Given the example with the relative clause moved after the verb ("The proposal caused
+    /// significant delays, which the executive committee rejected after extensive deliberation.")
+    /// When center-embedding is detected
+    /// Then nothing is reported
+    #[test]
+    fn a_clause_after_the_verb_is_not_center_embedded() {
+        let moved = "
+            1 The the DET _ _ 2 det
+            2 proposal proposal NOUN _ _ 3 nsubj
+            3 caused cause VERB _ _ 0 root
+            4 significant significant ADJ _ _ 5 amod
+            5 delays delay NOUN _ _ 3 obj
+            6 , , PUNCT _ _ 11 punct
+            7 which which PRON _ _ 11 obj
+            8 the the DET _ _ 10 det
+            9 executive executive ADJ _ _ 10 amod
+            10 committee committee NOUN _ _ 11 nsubj
+            11 rejected reject VERB _ _ 5 acl:relcl
+            12 after after ADP _ _ 14 case
+            13 extensive extensive ADJ _ _ 14 amod
+            14 deliberation deliberation NOUN _ _ 11 obl
+            15 . . PUNCT _ _ 3 punct";
+        assert_eq!(center_embeddings(&tree(tokens_from_conllu(moved))), []);
+    }
+
+    /// Given a clausal subtree that starts after the subject but crosses the verb
+    /// (`1 man nsubj→3, 2 left acl:relcl→1, 3 came root, 4 yesterday obl→2`, non-projective)
+    /// When center-embedding is detected
+    /// Then nothing is reported
+    #[test]
+    fn a_clause_crossing_the_verb_is_not_center_embedded() {
+        let crossing = "
+            1 man man NOUN _ _ 3 nsubj
+            2 left leave VERB _ _ 1 acl:relcl
+            3 came come VERB _ _ 0 root
+            4 yesterday yesterday NOUN _ _ 2 obl";
+        assert_eq!(center_embeddings(&tree(tokens_from_conllu(crossing))), []);
+    }
+
+    /// The content ids of `c` and of every content token below it in the projection.
+    fn naive_subtree(projection: &ContentTree<'_>, c: usize) -> Vec<usize> {
+        (1..=projection.tokens.len())
+            .filter(|&k| {
+                std::iter::successors(Some(k), |&a| {
+                    Some(projection.tokens[a - 1].head).filter(|&h| h != 0)
+                })
+                .any(|a| a == c)
+            })
+            .collect()
+    }
+
     fn distance_counts() -> impl Strategy<Value = DependencyDistance> {
         (prop_oneof![1 => Just(0usize), 3 => 1usize..100], 0usize..10).prop_map(
             |(dependencies, extra)| DependencyDistance {
@@ -433,6 +597,90 @@ mod tests {
                 .filter(|t| !t.is_punct() && clausal.contains(&t.deprel.as_str()))
                 .count();
             prop_assert_eq!(clause_count(&tree(tokens)), expected);
+        }
+
+        /// Given any well-formed tree
+        /// When center-embedding is detected
+        /// Then every reported subject precedes its verb, is an `nsubj` or `nsubj:pass` headed by
+        /// it, and has a clausal subtree strictly between them; each report names the pair's forms
+        /// and counts the alphanumeric forms strictly between them in the original sentence
+        #[test]
+        fn every_center_embedding_has_a_clause_strictly_inside(tokens in well_formed_tree()) {
+            let t = tree(tokens.clone());
+            let projection = content_tree(&t);
+            let pairs = embedded_pairs(&projection);
+            let reports = center_embeddings(&t);
+            prop_assert_eq!(reports.len(), pairs.len());
+            for (&(s, v), report) in pairs.iter().zip(&reports) {
+                let (subject, verb) = (projection.tokens[s - 1], projection.tokens[v - 1]);
+                prop_assert!(s < v);
+                prop_assert!(["nsubj", "nsubj:pass"].contains(&subject.token.deprel.as_str()));
+                prop_assert_eq!(subject.head, v);
+                let inside = (1..=projection.tokens.len()).any(|c| {
+                    is_clausal(&projection.tokens[c - 1].token.deprel)
+                        && naive_subtree(&projection, c).iter().all(|&k| s < k && k < v)
+                });
+                prop_assert!(inside, "({}, {})", s, v);
+                let words = tokens[subject.token.id..verb.token.id - 1]
+                    .iter()
+                    .filter(|t| t.form.chars().any(char::is_alphanumeric))
+                    .count();
+                let expected = CenterEmbedding {
+                    subject: subject.token.form.clone(),
+                    verb: verb.token.form.clone(),
+                    words_between: words,
+                };
+                prop_assert_eq!(report, &expected);
+            }
+        }
+
+        /// Given any well-formed tree, and a `PUNCT` leaf inserted at any position under any token
+        /// (later ids and heads shifted up by one); the leaf's form is non-alphanumeric, because
+        /// `words_between` counts words by form and a `PUNCT` token spelled like a word would
+        /// rightly count
+        /// When the syntactic metrics are computed on both
+        /// Then they are equal
+        #[test]
+        fn punctuation_leaves_do_not_change_the_metrics(
+            tokens in well_formed_tree(),
+            at in any::<prop::sample::Index>(),
+            under in any::<prop::sample::Index>(),
+            form in prop::sample::select(vec![",", ";", "—", "(", ")", "."]),
+        ) {
+            let n = tokens.len();
+            let position = at.index(n + 1) + 1;
+            let shift = |id: usize| if id >= position { id + 1 } else { id };
+            let mut punctuated: Vec<Token> = tokens
+                .iter()
+                .map(|t| Token { id: shift(t.id), head: shift(t.head), ..t.clone() })
+                .collect();
+            let leaf = Token {
+                id: position,
+                form: form.to_owned(),
+                lemma: form.to_owned(),
+                upostag: "PUNCT".to_owned(),
+                head: shift(under.index(n) + 1),
+                deprel: "punct".to_owned(),
+            };
+            punctuated.insert(position - 1, leaf);
+            prop_assert_eq!(
+                syntactic_metrics(&tree(punctuated)),
+                syntactic_metrics(&tree(tokens))
+            );
+        }
+
+        /// Given any well-formed tree
+        /// When its syntactic metrics are computed
+        /// Then they bundle the individual metrics, and the MDD is the distance's mean
+        #[test]
+        fn syntactic_metrics_bundle_the_metrics(tokens in well_formed_tree()) {
+            let t = tree(tokens);
+            let metrics = syntactic_metrics(&t);
+            prop_assert_eq!(metrics.distance, dependency_distance(&t));
+            prop_assert_eq!(metrics.depth, depth(&t));
+            prop_assert_eq!(metrics.clauses, clause_count(&t));
+            prop_assert_eq!(&metrics.center_embeddings, &center_embeddings(&t));
+            prop_assert_eq!(metrics.mdd(), dependency_distance(&t).mean());
         }
 
         /// Given any three dependency distances
