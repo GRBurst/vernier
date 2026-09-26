@@ -76,21 +76,21 @@ Parse Markdown with `pulldown-cmark`, keep only prose, and map every kept charac
 - `pulldown-cmark` options: tables, math, YAML and TOML metadata blocks enabled so they can be recognised and dropped; use `into_offset_iter()` for byte ranges.
 - Plain-text files are one prose span each; `.md` and `.markdown` (any letter case) are Markdown, anything else is plain text.
 
-## M2 — Surface readability engine (Status: PLANNED)
+## M2 — Surface readability engine (Status: IMPLEMENTED)
 <a id="M2"></a>
 
 Count words, sentences and syllables, and compute FRE, FKGL, Gunning Fog and average sentence length per sentence and per file.
 
 **Acceptance Criteria:**
 
-- [ ] THE engine SHALL compute FRE = 206.835 − 1.015·(words/sentences) − 84.6·(syllables/words), FKGL = 0.39·(words/sentences) + 11.8·(syllables/words) − 15.59 and Fog = 0.4·((words/sentences) + 100·(complex words/words)).
-- [ ] WHEN the counts are 100 words, 5 sentences and 150 syllables, THE engine SHALL return FRE 59.635 and FKGL 9.91 within 1e-9.
-- [ ] FOR fixed words and sentences, THE engine SHALL return a strictly lower FRE and a strictly higher FKGL when syllables increase (property test).
-- [ ] WHEN a text has zero words or zero sentences, THE engine SHALL report the metrics as absent rather than dividing by zero.
-- [ ] THE syllable counter SHALL return at least 1 for every word containing a letter, and exactly 1 for a word of digits only.
-- [ ] THE syllable counter SHALL agree on at least 90 % of a committed reference list of 500 frequent English words sampled from CMUdict (keeping CMU's license notice), measured and committed under `docs/specs/001-vernier/measurements/`.
-- [ ] THE engine SHALL count a word as complex when it has 3 or more syllables after subtracting one for a final suffix that is itself a syllable (`-ing`; `-ed` after `t` or `d`; `-es` after `s`, `x`, `z`, `ch`, `sh`, `ce` or `ge`), and is not capitalized in a non-sentence-initial position (Gunning's rule for proper nouns).
-- [ ] WHEN a sentence has more than `--max-sentence-len` words (default 25), THE engine SHALL flag it as `LongSentence`.
+- [x] THE engine SHALL compute FRE = 206.835 − 1.015·(words/sentences) − 84.6·(syllables/words), FKGL = 0.39·(words/sentences) + 11.8·(syllables/words) − 15.59 and Fog = 0.4·((words/sentences) + 100·(complex words/words)).
+- [x] WHEN the counts are 100 words, 5 sentences and 150 syllables, THE engine SHALL return FRE 59.635 and FKGL 9.91 within 1e-9.
+- [x] FOR fixed words and sentences, THE engine SHALL return a strictly lower FRE and a strictly higher FKGL when syllables increase (property test).
+- [x] WHEN a text has zero words or zero sentences, THE engine SHALL report the metrics as absent rather than dividing by zero.
+- [x] THE syllable counter SHALL return at least 1 for every word containing a letter, and exactly 1 for a word of digits only.
+- [x] THE syllable counter SHALL agree on at least 90 % of a committed reference list of 500 frequent English words sampled from CMUdict (keeping CMU's license notice), measured and committed under `docs/specs/001-vernier/measurements/`.
+- [x] THE engine SHALL count a word as complex when it has 3 or more syllables after subtracting one for a final suffix that is itself a syllable (`-ing`; `-ed` after `t` or `d`; `-es` after `s`, `x`, `z`, `ch`, `sh`, `ce` or `ge`), and is not capitalized in a non-sentence-initial position (Gunning's rule for proper nouns).
+- [x] WHEN a sentence has more than `--max-sentence-len` words (default 25), THE engine SHALL flag it as `LongSentence`.
 
 **Implementation Details:**
 
