@@ -241,6 +241,6 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | T7 | block join + offset map | `src/block.rs`, `src/lib.rs` | P9 against identity map | `Block` | done |
 | T8 | sentence splitting | `src/sentence.rs`, `src/lib.rs` | spike cases, abbreviation laws, P10, P11 against one-sentence-per-block | UAX #29 + merge + trim | done |
 | T9 | analysis + `LongSentence` | `src/analysis.rs`, `src/lib.rs` | P12, `empty_file_has_absent_metrics` | `analyze` | done |
-| T10 | `analyze` renders metrics | `src/summary.rs`, `src/main.rs`, `tests/cli.rs` | `analyze_prints_surface_metrics` (expectation from the library); M1's test unchanged | `render` lines 2–3 | todo |
+| T10 | `analyze` renders metrics | `src/summary.rs`, `src/main.rs`, `tests/cli.rs` | `analyze_prints_surface_metrics` (expectation from the library); M1's test unchanged | `render` lines 2–3 | done |
 | T11 | `check` flags and exits 1 | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/long.md` | `check_flags_a_long_sentence_and_exits_1`, `…max_sentence_len_raises_the_bar`, `check_on_sample_exits_0` | `check` loop | todo |
 | T12 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | todo |

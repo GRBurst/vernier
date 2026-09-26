@@ -1,10 +1,10 @@
-//! End-to-end checks of the `vernier` binary (spec 001 M1).
+//! End-to-end checks of the `vernier` binary (spec 001 M1, M2).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use vernier::prose::SourceFormat;
-use vernier::summary::{render, summarize};
+use vernier::summary::{FileSummary, render, summarize};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -32,6 +32,53 @@ fn vernier(args: &[&str], files: &[&Path]) -> Output {
 fn expected_line(path: &Path) -> String {
     let source = std::fs::read_to_string(path).unwrap();
     render(path, &summarize(&source, SourceFormat::from_path(path)))
+}
+
+/// The library's summary of a file.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn library_summary(path: &Path) -> FileSummary {
+    let source = std::fs::read_to_string(path).unwrap();
+    summarize(&source, SourceFormat::from_path(path))
+}
+
+/// Given a readable Markdown file and a readable plain-text file
+/// When `vernier analyze` runs on both
+/// Then each file's summary line is followed by its sentence counts and its four scores to
+/// 2 decimals, as the library computes them, and it exits 0
+#[test]
+fn analyze_prints_surface_metrics() {
+    let (md, txt) = (fixture("sample.md"), fixture("plain.txt"));
+    let out = vernier(&["analyze"], &[&md, &txt]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 6, "{stdout}");
+    for (i, path) in [&md, &txt].into_iter().enumerate() {
+        let summary = library_summary(path);
+        let (c, r) = (summary.counts, summary.readability.unwrap());
+        assert_eq!(
+            lines[3 * i + 1],
+            format!(
+                "  {} sentences, {} syllables, {} complex words",
+                c.sentences, c.syllables, c.complex_words
+            )
+        );
+        assert_eq!(
+            lines[3 * i + 2],
+            format!(
+                "  Flesch Reading Ease {:.2}, Flesch-Kincaid Grade {:.2}, Gunning Fog {:.2}, average sentence length {:.2}",
+                r.flesch_reading_ease,
+                r.flesch_kincaid_grade,
+                r.gunning_fog,
+                r.average_sentence_length
+            )
+        );
+    }
+    // Witnesses: sample.md holds 4 sentences (paragraph, two tight items, blockquote); plain.txt
+    // holds 2 hard-wrapped sentences of 9 syllables and no complex word.
+    assert!(lines[1].starts_with("  4 sentences, "), "{stdout}");
+    assert_eq!(lines[4], "  2 sentences, 9 syllables, 0 complex words");
 }
 
 /// Given a readable Markdown file and a readable plain-text file
