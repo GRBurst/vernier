@@ -329,8 +329,8 @@ W8's empty-alt image was added during F1.1: in `x ![alt](i) y` the dropped alt `
 | 2 | bit always `true` | W5–W8 | [x] (planted as "true for every span after the first"; all of W5–W9 red) |
 | 3 | `Image` in the transparent set | W8 (empty-alt image `x ![](i) y`) | [x] (only that witness red) |
 | 4 | a dropped `Text` does not clear the bit | W9, W5 | [x] (role-dropped `Text` → W9 red; kept `Text` without a span → W5 red) |
-| 5 | `Block::from_spans` ignores the bit | P13 | [ ] |
-| 6 | P13 generator without wrappings (mᵢ = none only) | plant #5 no longer fails P13 — shows the generator reaches the wrapped case (audit 005) | [ ] |
+| 5 | `Block::from_spans` ignores the bit | P13 | [x] |
+| 6 | P13 generator without wrappings (mᵢ = none only) | plant #5 no longer fails P13 — shows the generator reaches the wrapped case (audit 005) | [x] (P13 green 3/3 with #5 and #6 planted together) |
 
 ### Coverage gap (run by hand)
 Inline constructs behind options that `options()` does not enable (footnotes, wikilinks, smart punctuation) are not generated; if an option is enabled later, its events fall into "not transparent" by the `matches!` default — a space, never a wrong join.
@@ -363,5 +363,5 @@ fn is_transparent(tag: TagEnd | &Tag) -> bool  // matches!(…, Emphasis | Stron
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | F1.0 | spec + audit | `spec.md`, `docs/audits/006-…`, this plan | — (docs) | definition corrected | done |
 | F1.1 | join bit per boundary kind | `src/prose.rs`, this plan (ticks) | W1–W9 bits against `joins_previous() → false` (W1–W4 red) | `joinable` state in `extract_blocks`; plants 1–4 | done |
-| F1.2 | block joins on the bit | `src/block.rs`, `src/analysis.rs`, this plan | P13 + W texts red against the always-space join | `from_spans` uses the bit. `parses_the_prose_not_the_markup` changes because its fixture was keyed on the buggy `The proposal , which`; it now expects `EXAMPLE_TEXT` (the corrected text is the parser input the test always meant). Plants 5–6 | todo |
+| F1.2 | block joins on the bit | `src/block.rs`, `src/analysis.rs`, this plan | P13 + W texts red against the always-space join | `from_spans` uses the bit. `parses_the_prose_not_the_markup` changes because its fixture was keyed on the buggy `The proposal , which`; it now expects `EXAMPLE_TEXT` (the corrected text is the parser input the test always meant). Plants 5–6 | done |
 | F1.3 | close-out | `docs/HANDOVER.md`, this plan | `just verify` | — | todo |

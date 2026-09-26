@@ -358,14 +358,13 @@ mod tests {
 
     /// Given the example sentence with its subject in bold (`**The proposal**, which …`), and a
     /// parser that knows only the sentence's prose text (block prose joins the bold span and the
-    /// rest with one space, so the text reads "The proposal , which …") and fails on anything else
+    /// comma directly, so the text is the example sentence itself) and fails on anything else
     /// When it is analyzed with that parser
     /// Then the parser is given the prose, not the markup, and the center-embedding is reported
     #[test]
     fn parses_the_prose_not_the_markup() {
         let source = EXAMPLE_TEXT.replacen("The proposal", "**The proposal**", 1);
-        let prose = EXAMPLE_TEXT.replacen("proposal,", "proposal ,", 1);
-        let parser = example_parser(&prose);
+        let parser = example_parser(EXAMPLE_TEXT);
         let file = analyze_parsed(&source, SourceFormat::Markdown, &thresholds(25), &parser);
         let syntax = file.unwrap().sentences[0].syntax.clone().unwrap();
         assert!(syntax.flags.contains(&proposal_caused_8()), "{syntax:?}");

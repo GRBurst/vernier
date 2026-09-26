@@ -3,9 +3,10 @@
 
 use crate::prose::ProseSpan;
 
-/// The prose of one block: its spans joined by one space, every line feed and carriage return
-/// read as a space. Both replacements are one byte for one byte, so each span keeps its length
-/// and the map back to the source is one shift per span.
+/// The prose of one block: its spans joined directly where only inline delimiters separate them
+/// and by one space otherwise, every line feed and carriage return read as a space. Both
+/// replacements are one byte for one byte, so each span keeps its length and the map back to the
+/// source is one shift per span.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
     text: String,
@@ -25,7 +26,7 @@ impl Block {
         let mut text = String::new();
         let mut pieces = Vec::with_capacity(spans.len());
         for span in spans {
-            if !pieces.is_empty() {
+            if !pieces.is_empty() && !span.joins_previous() {
                 text.push(' ');
             }
             pieces.push(Piece {
@@ -64,20 +65,111 @@ impl Block {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::{Thresholds, analyze};
     use crate::prose::{SourceFormat, blocks};
+    use crate::words::words;
     use proptest::prelude::*;
 
-    /// The byte ranges in the block text of each span (a separator space lies between two).
+    /// The byte ranges in the block text of each span: a separator space lies before every span
+    /// after the first that does not join its predecessor.
     fn span_ranges(spans: &[ProseSpan<'_>]) -> Vec<std::ops::Range<usize>> {
-        let mut start = 0;
+        let mut end = 0;
         spans
             .iter()
-            .map(|span| {
-                let range = start..start + span.text().len();
-                start = range.end + 1;
-                range
+            .enumerate()
+            .map(|(i, span)| {
+                let start = if i > 0 && !span.joins_previous() {
+                    end + 1
+                } else {
+                    end
+                };
+                end = start + span.text().len();
+                start..end
             })
             .collect()
+    }
+
+    /// The text of the only block of a Markdown source.
+    fn block_text(markdown: &str) -> String {
+        let all = blocks(markdown, SourceFormat::Markdown);
+        assert_eq!(all.len(), 1, "{markdown:?}");
+        Block::from_spans(&all[0]).text().to_owned()
+    }
+
+    /// A word, how it is wrapped in inline markup, and the punctuation after it.
+    fn marked_word() -> impl Strategy<Value = (String, &'static str, &'static str)> {
+        (
+            "[a-z]{1,8}",
+            prop::sample::select(vec!["{}", "*{}*", "**{}**", "[{}](u)"]),
+            prop::sample::select(vec!["", ",", "."]),
+        )
+    }
+
+    /// The same paragraph without markup, and with each word wrapped as drawn.
+    fn plain_and_wrapped(words: &[(String, &str, &str)]) -> (String, String) {
+        let plain: Vec<String> = words.iter().map(|(w, _, p)| format!("{w}{p}")).collect();
+        let wrapped: Vec<String> = words
+            .iter()
+            .map(|(w, shape, p)| format!("{}{p}", shape.replace("{}", w)))
+            .collect();
+        (plain.join(" "), wrapped.join(" "))
+    }
+
+    fn defaults() -> Thresholds {
+        Thresholds {
+            max_sentence_len: 25,
+            max_mdd: 3.0,
+            max_tree_depth: 5,
+            max_clauses: 2,
+        }
+    }
+
+    /// Given spans split only by inline markup or an escape
+    /// When each block is built
+    /// Then the spans are joined directly, as the reader sees them (W1–W4)
+    #[test]
+    fn inline_markup_joins_spans_directly() {
+        for (markdown, text) in [
+            ("**The proposal**, which", "The proposal, which"),
+            ("un*believ*able", "unbelievable"),
+            ("a [b](u) c", "a b c"),
+            ("a\\*b", "a*b"),
+        ] {
+            assert_eq!(block_text(markdown), text, "{markdown:?}");
+        }
+    }
+
+    /// Given a word with emphasis inside it (`un*believ*able`)
+    /// When its file is analyzed
+    /// Then it counts as one word, like the unmarked word
+    #[test]
+    fn intraword_emphasis_keeps_one_word() {
+        let marked = analyze("un*believ*able", SourceFormat::Markdown, &defaults()).totals;
+        let plain = analyze("unbelievable", SourceFormat::Markdown, &defaults()).totals;
+        assert_eq!(marked.words, 1);
+        assert_eq!(marked, plain);
+    }
+
+    /// Given spans separated by a character reference, a line break, inline code, inline HTML,
+    /// an image or a bare autolink
+    /// When each block is built
+    /// Then a space separates them: exactly one where only a break or reference lies between
+    /// (W5–W7), and the reader's words wherever a dropped construct adds more (W8, W9)
+    #[test]
+    fn other_boundaries_separate_spans() {
+        for (markdown, text) in [("AT&amp;T", "AT T"), ("a  \nb", "a b"), ("a\nb", "a b")] {
+            assert_eq!(block_text(markdown), text, "{markdown:?}");
+        }
+        for (markdown, expected) in [
+            ("a `x` b", vec!["a", "b"]),
+            ("a <i>b</i> c", vec!["a", "b", "c"]),
+            ("x ![alt](i) y", vec!["x", "y"]),
+            ("x ![](i) y", vec!["x", "y"]),
+            ("see <http://x.y> now", vec!["see", "now"]),
+        ] {
+            let text = block_text(markdown);
+            assert_eq!(words(&text).collect::<Vec<_>>(), expected, "{markdown:?}");
+        }
     }
 
     fn as_block_char(c: char) -> char {
@@ -142,17 +234,40 @@ mod tests {
 
         /// Given generated sources and each of their blocks
         /// When the offsets of the block text are mapped in order
-        /// Then the source offsets never decrease, and a separator maps to the end of the span before it
+        /// Then the source offsets never decrease; a separator space stands exactly before each
+        /// span that does not join its predecessor and maps to the end of the span before it; a
+        /// joined boundary maps to the start of the joining span
         #[test]
         fn the_map_is_monotone_and_separators_map_to_span_ends((src, format) in source()) {
             for spans in blocks(&src, format) {
                 let block = Block::from_spans(&spans);
                 let mapped: Vec<usize> = (0..=block.text().len()).map(|o| block.source_offset(o)).collect();
                 prop_assert!(mapped.windows(2).all(|w| w[0] <= w[1]));
-                for (range, span) in span_ranges(&spans).iter().zip(&spans) {
-                    prop_assert_eq!(block.source_offset(range.end), span.range().end);
+                let ranges = span_ranges(&spans);
+                prop_assert_eq!(ranges.last().map_or(0, |r| r.end), block.text().len());
+                for (i, (range, span)) in ranges.iter().zip(&spans).enumerate() {
+                    if i > 0 && !span.joins_previous() {
+                        prop_assert_eq!(&block.text()[range.start - 1..range.start], " ");
+                    }
+                    let joined_next = spans.get(i + 1).filter(|next| next.joins_previous());
+                    let expected = joined_next.map_or(span.range().end, |next| next.range().start);
+                    prop_assert_eq!(block.source_offset(range.end), expected);
                 }
             }
+        }
+
+        /// Given a paragraph of words, each optionally wrapped in emphasis, strong or a link and
+        /// optionally followed by a comma or full stop, and the same paragraph without markup
+        /// When their blocks are built and the files analyzed
+        /// Then both have the same block text and the same totals
+        #[test]
+        fn inline_markup_changes_neither_block_text_nor_counts(
+            words in prop::collection::vec(marked_word(), 1..12)
+        ) {
+            let (plain, wrapped) = plain_and_wrapped(&words);
+            prop_assert_eq!(block_text(&wrapped), block_text(&plain), "{:?}", wrapped);
+            let totals = |md: &str| analyze(md, SourceFormat::Markdown, &defaults()).totals;
+            prop_assert_eq!(totals(&wrapped), totals(&plain), "{:?}", wrapped);
         }
     }
 
