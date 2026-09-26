@@ -2,9 +2,9 @@
 
 ## 1. Preconditions verified
 
-- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 131 tests (117 lib unit, 3 bin, 11 integration).
+- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 140 tests (126 lib unit, 3 bin, 11 integration) after follow-up F1.
 - `PROPTEST_CASES=3000 cargo test --lib` passed.
-- Every planted violation in `docs/specs/001-vernier/plan-M3a.md` was seen to fail (12/12, with the proptest seeds moved aside), then reverted.
+- Every planted violation in `docs/specs/001-vernier/plan-M3a.md` was seen to fail (12/12, with the proptest seeds moved aside), then reverted; so was every F1 plant in `plan-M2.md` (7/7).
 - Nested `devenv shell -- …` fails in the agent sandbox. Commits are unsigned (D13) and the pre-commit hook runs `just verify`.
 
 ## 2. What changed
@@ -30,6 +30,7 @@
   - `src/syntax.rs`: content projection (drop `PUNCT`, renumber, reattach; a root when only `PUNCT` ancestors), `DependencyDistance` monoid (file MDD pools, never averages), `depth` in edges, `clause_count`, `center_embeddings`, `SyntacticMetrics`.
   - `src/analysis.rs`: `SyntacticFlag` (carries its value), `syntactic_flags`, `analyze_parsed(.., &impl Parser)`; `analyze` unchanged. `main.rs` renders the four messages (unit-tested only; no CLI path has a parser until M3b). `--max-tree-depth` help says edges.
   - The example parse is UDPipe 2's real output (LINDAT, `english-ewt-ud-2.17`): MDD 32/12 ≈ 2.67 (so `HighMdd` is not raised at 3.0), depth 4, 1 clause, center-embedding proposal/caused/8.
+- **Follow-up F1, block prose across inline markup** (audit 006, plan-M2 section F1, commits 33d9158..4f05aaa): spans are joined directly when only emphasis/strong/strikethrough/super-/subscript/link delimiters lie between them, otherwise with one space (`ProseSpan::joins_previous`, set by `extract_blocks`). `**The proposal**, which` now reaches sentences as `The proposal, which`; `un*believ*able` is one word, also on M1's word line (`summarize` counts words on block text). Changed test: `analysis::parses_the_prose_not_the_markup` now keys on `EXAMPLE_TEXT` (it was keyed on the buggy text).
 - A changed M1 test: `check … --max-sentence-len 10` on sample.md now exits 1 (sample.md has a 13-word sentence). The old test passes 30, and a new test asserts the flag at 10.
 
 ## 3. How to check
@@ -57,8 +58,7 @@ cargo run -q -- check tests/fixtures/long.md; echo $?
 
 ## Next action
 
-1. Block-prose join fix (found in M3a T9): spans are joined with one space even where only inline markup separates them, so `**The proposal**, which` reaches sentences (and M3b's parser) as `The proposal , which`. Fix the *Block prose* definition in place (spec is Draft), audit 006, then the code (follow-up section in `plan-M2.md`).
-2. M3b spike report (udpipe vs ONNX/`ort`), committed; the user chooses the route from it.
+1. M3b spike report (udpipe vs ONNX/`ort`): the subagent run writes `docs/specs/001-vernier/research/m3b-parser-spike.md` and `measurements/parser-sample.md`; review and commit them. The user chooses the route from the report.
 
 ## Known-bad approaches
 
