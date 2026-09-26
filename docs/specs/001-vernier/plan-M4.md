@@ -237,7 +237,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13;
 | ID | Scenario | Files | RED (must fail first) | GREEN | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | T0 | spec correction, data, plan | `spec.md`, `docs/audits/007-…`, `data/nominalization-stoplist.{txt,PYBIBER-LICENSE}`, this plan | — (docs/data) | criteria corrected; list committed | done |
-| T1 | committed stoplist | `src/nominalization.rs`, `src/lib.rs` | P1 + `contains("city")` against `committed()` returning an empty list | parse `STOPLIST` | todo |
+| T1 | committed stoplist | `src/nominalization.rs`, `src/lib.rs` | P1 + `contains("city")` against `committed()` returning an empty list | parse `STOPLIST` | done |
 | T2 | surface lemma | `src/nominalization.rs` | table + P3 against identity lower-casing; plant 1 | `surface_lemma` | todo |
 | T3 | predicate + counts + monoid | `src/nominalization.rs` | P2, P4, P5, P6, P7, `rations` against `is_nominalization → false` and a zero `ratio`; plants 2, 3, 10 | `is_nominalization`, `surface_nominalizations`, `parsed_nominalizations`, `NominalizationCount` | todo |
 | T4 | passive heads + alignment | `src/passive.rs`, `src/lib.rs`, `src/testing.rs` (`NOMZ_*`, `PASSIVE_*`) | P8, P9, dedup and `PASSIVE` heads against empty outputs; plants 6, 7, 11 | `passive_heads`, `align` | todo |
