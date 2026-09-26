@@ -20,11 +20,12 @@ This file is always loaded; every line must pass the test *would removing it cau
 - If a "why" is unclear or a question is open — at any phase — stop and ask the user; never guess intent (D6).
 - Before implementing, brief the user in one or two plain sentences; report as preconditions verified → what changed → exact check commands, with a minimal example (D7).
 - Commit messages state the problem solved and end with the tier: `(full-spec)`, `(spec-delta)` or `(direct-patch)` (D2, D8).
-- End every session with an updated `docs/HANDOVER.md` and a clean commit (A5).
+- End every session with an updated `docs/HANDOVER.md` and a clean commit (A5). Commit unsigned: `git -c commit.gpgsign=false commit …` (D13).
 - `.sdd/` is untracked scratch; anything the user asks to persist goes into a committed file (B5).
 - Tests state laws and properties, not just constants (A4). Cognitive complexity ≤ 10 per function; no `unsafe` without an ADR (D9).
 - Test first, pure core, typed outcomes; no `unwrap`/`expect`/`panic!` outside tests — an `#[allow]` carries a `// why:` (D10).
 - Every corrected mistake gets a committed `docs/audits/<NNN>-<slug>.md` before the fix counts as done (D11).
+- A milestone's plan goes to `docs/specs/<NNN>-<slug>/plan-<milestone>.md` (D12).
 - Never create or modify global cargo, rustup or user configs; everything runs through devenv (B4).
 
 ## Commands

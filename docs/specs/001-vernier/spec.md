@@ -52,21 +52,21 @@ The metric values in this example are illustrative; the criteria below, not the 
 - **Content token:** a parsed token whose `upostag` is not `PUNCT`; content tokens are renumbered 1..N in sentence order before any distance is measured. [NEEDS CLARIFICATION: renumber after dropping punctuation, or keep the parser's ids? Fallback: renumber.]
 - **Clausal relation:** a `deprel` whose part before any `:` is one of `advcl`, `acl`, `csubj`, `ccomp` (so `acl:relcl` counts).
 
-## M1 — CLI skeleton and prose extractor (Status: PLANNED)
+## M1 — CLI skeleton and prose extractor (Status: IMPLEMENTED)
 <a id="M1"></a>
 
 Parse Markdown with `pulldown-cmark`, keep only prose, and map every kept character back to its source position.
 
 **Acceptance Criteria:**
 
-- [ ] WHEN `extract_prose` receives Markdown, THE extractor SHALL return only text from paragraphs, list items and blockquotes, each span carrying its source byte range.
-- [ ] THE extractor SHALL drop fenced and indented code blocks, inline code, HTML blocks and inline HTML, YAML (`---`) and TOML (`+++`) frontmatter, math, tables, headings and image alt text. [NEEDS CLARIFICATION: headings and image alt text are not in your list of kept or dropped content. Fallback: both dropped.]
-- [ ] WHEN a link is extracted, THE extractor SHALL keep its link text and drop its URL; a bare autolink SHALL contribute no text.
-- [ ] FOR every returned span, THE slice of the source at its byte range SHALL equal the span text (property test over generated Markdown).
-- [ ] WHEN a byte offset is converted to a position, THE converter SHALL return the line and column that a scan of the source up to that offset yields (property test, including multi-byte characters and CRLF line ends).
-- [ ] WHEN `vernier analyze FILE` runs on a readable file, THE tool SHALL print per file the number of prose spans and words and exit 0.
-- [ ] WHEN a file cannot be read, THE tool SHALL name the file on stderr and exit 2.
-- [ ] THE CLI SHALL be defined with `clap` derive and accept the flags of M5 from this milestone on, even where a flag has no effect yet.
+- [x] WHEN `extract_prose` receives Markdown, THE extractor SHALL return only text from paragraphs, list items and blockquotes, each span carrying its source byte range.
+- [x] THE extractor SHALL drop fenced and indented code blocks, inline code, HTML blocks and inline HTML, YAML (`---`) and TOML (`+++`) frontmatter, math, tables, headings and image alt text. [NEEDS CLARIFICATION: headings and image alt text are not in your list of kept or dropped content. Fallback: both dropped.]
+- [x] WHEN a link is extracted, THE extractor SHALL keep its link text and drop its URL; a bare autolink SHALL contribute no text.
+- [x] FOR every returned span, THE slice of the source at its byte range SHALL equal the span text (property test over generated Markdown).
+- [x] WHEN a byte offset is converted to a position, THE converter SHALL return the line and column that a scan of the source up to that offset yields (property test, including multi-byte characters and CRLF line ends).
+- [x] WHEN `vernier analyze FILE` runs on a readable file, THE tool SHALL print per file the number of prose spans and words and exit 0.
+- [x] WHEN a file cannot be read, THE tool SHALL name the file on stderr and exit 2.
+- [x] THE CLI SHALL be defined with `clap` derive and accept the flags of M5 from this milestone on, even where a flag has no effect yet.
 
 **Implementation Details:**
 

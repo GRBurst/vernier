@@ -1,7 +1,7 @@
 # vernier
 
 Readability and syntactic-complexity analyzer for Markdown, written in Rust.
-Status: spec 001 is a draft; nothing is implemented beyond a skeleton. See `docs/HANDOVER.md`.
+Status: spec 001 is a draft; M1 (prose extraction, `vernier analyze` span and word counts) is implemented. See `docs/HANDOVER.md`.
 
 ```sh
 devenv shell          # pinned toolchain: rust, just, python3, git hooks

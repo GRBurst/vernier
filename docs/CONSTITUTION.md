@@ -106,3 +106,13 @@ Adapted on 2026-09-26 from the constitution of the SDD framework repository, tri
   Every corrected mistake gets `docs/audits/<NNN>-<slug>.md` (three-digit ordinal, never reused; Symptom, Root cause, Rule) committed before the fix counts as done. Audits are append-only; a rule no longer valid is marked `SUPERSEDED by <NNN>`.
   *Why:* a mistake fixed without a written rule is made again by the next context.
   Added 2026-09-26; extends D1's artifact locations.
+<a id="D12"></a>
+- **D12 — Plan location.**
+  A milestone's plan lives at `docs/specs/<NNN>-<slug>/plan-<milestone>.md` (e.g. `plan-M1.md`), written before its code and committed with it. Extends D1.
+  *Why:* D1 named no place for plans; M1's plan set this one and the user confirmed it.
+  Added 2026-09-26.
+<a id="D13"></a>
+- **D13 — Unsigned commits.**
+  Commits in this repository are made unsigned, overriding the user's global `commit.gpgsign = true` per command only: `git -c commit.gpgsign=false commit …`. No git config file is changed (B4).
+  *Why:* the agent sandbox denies `~/.gnupg`, so a signed commit is impossible there, and a session that cannot commit cannot end at a commit boundary (A5). Decided by the user on 2026-09-26.
+  Added 2026-09-26.

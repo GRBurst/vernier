@@ -7,6 +7,10 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+thiserror = "2"
+unicode-segmentation = "1"
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -22,3 +26,6 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
+
+[dev-dependencies]
+proptest = "1"
