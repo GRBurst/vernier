@@ -22,3 +22,10 @@ The law checked "a miss leaves the cursor" but never "a miss costs exactly one p
 When a design claims to "degrade locally", enumerate each kind of disturbance: insertion, deletion, substitution.
 Give each one a generator branch whose law states that only the disturbed position changes.
 Fixed: after a miss at the cursor, the form may match at the next later word start. The new law P9″ covers substitution, and plant 7″ (cursor-only matching) must turn it red.
+
+## Residual limit (found in T4b)
+In-order matching cannot tell an inserted token, which must not consume a text word, from a substituted one, whose text word should be skipped.
+After a miss, the cursor stays on the substituted token's word.
+If the next form is a prefix of that word (or equal to it: `the the`, `' '`), the next form matches there: one offset lands one word early, and the tail realigns.
+Law P9″ therefore assumes that the form after the substituted one is not a prefix of the substituted token's original form.
+The unconditioned case is a witness of this known limit: `["'", "'"]` with token 0 substituted aligns as `[None, Some(0)]`.
