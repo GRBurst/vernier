@@ -245,3 +245,121 @@ All tasks T0–T12 done 2026-09-27 (91 tests); `just verify` green. Planted viol
 | T10 | `analyze` renders metrics | `src/summary.rs`, `src/main.rs`, `tests/cli.rs` | `analyze_prints_surface_metrics` (expectation from the library); M1's test unchanged | `render` lines 2–3 | done |
 | T11 | `check` flags and exits 1 | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/long.md` | `check_flags_a_long_sentence_and_exits_1`, `…max_sentence_len_raises_the_bar`, `check_on_sample_exits_0` | `check` loop | done |
 | T12 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | done |
+
+## Follow-up F1 — block prose joins across inline markup
+
+### Motivation
+The spec's *Block prose* definition (corrected in place, [audit 006](../../audits/006-block-prose-spaces-inside-markup.md)) joins two consecutive spans directly when only inline emphasis, strong, strikethrough, superscript, subscript or link delimiters lie between them, and with one space otherwise.
+`Block::from_spans` always inserted a space, so `**The proposal**, which` became `The proposal , which` and `un*believ*able` became three words; M3b would hand that text to the parser.
+
+### Approach
+`extract_blocks` already walks the event stream; it records, per kept span, whether the previous kept span of the same block is reachable through transparent events only.
+`ProseSpan` carries that bit (private field, set only in `prose.rs`); `Block::from_spans` writes no separator before a span whose bit is set.
+Plain-text spans never join (their bit is `false`), so plain text is unchanged.
+
+### Decisions made
+| Choice | Rationale | Rejected |
+| :--- | :--- | :--- |
+| Decide the join from the event stream | the event stream is the only place that knows what separated two `Text` events | source-gap test "gap consists of `*`, `_`, `[`, `](url)`" — re-implements CommonMark and misreads `a\*b`, link URLs, `~` |
+| Bit on `ProseSpan`, not a separate `Vec<bool>` | the join belongs to the span; one vector keeps `blocks()`' signature | parallel vector — can drift out of step with the spans |
+| Transparent set = Start/End of `Emphasis`, `Strong`, `Strikethrough`, `Superscript`, `Subscript`, `Link` | exactly the inline tags whose text is kept and whose delimiters render as nothing | including `Image` — its alt text is dropped, so the reader sees a picture, not a joined word |
+| Any other event between spans (dropped `Text`, `Code`, `SoftBreak`, `HardBreak`, `InlineHtml`, `InlineMath`, `Start/End(Image)`, …) forces a space | conservative: a word boundary where something non-textual was | joining across a character reference (`AT&amp;T` → `ATT`) — the decoded `&` cannot be kept (the span must borrow the slice), and `ATT` is a word the reader never sees |
+
+### Gate
+| Principle | Result |
+| :--- | :--- |
+| A2 specs are contracts | PASS — definition corrected in place while `Draft` (D4), audit 006; one existing test changes (F1.2, justified there) |
+| A3 ≤ 5 files per task | PASS — F1.1: 2 files, F1.2: 3 files |
+| A4 properties over constants | PASS — P13 markup invariance; literals only for the boundary-kind witnesses |
+| D9 complexity ≤ 10, no `unsafe` | PASS — the transparency test is its own `fn`; the loop gains one branch |
+| D10 §5 newtypes | PASS — the bit is private, set only by `extract_blocks` |
+| D10 §6/§7/§8 | PASS — pure core, no new outcome, no banned construct |
+| Engineering §2 new dependency | N/A — none added |
+| Phase 2 human gates | VIOLATION — still owed (BACKLOG item 2), as for M2 |
+
+### Files to read first
+`docs/ENGINEERING.md`, `docs/audits/005-…` and `006-…`, `src/prose.rs`, `src/block.rs`, `src/analysis.rs` (test `parses_the_prose_not_the_markup`), `src/testing.rs`, this section.
+`export CARGO_HOME=$DEVENV_STATE/cargo` before cargo (audit 002); scratch in `.sdd/` (audit 001). `.sdd/join/` has an `ev` bin that prints pulldown events for an argument string (options may differ from `prose::options()`).
+
+### Type checking strategy
+`just lint` after every GREEN. Expected rejections: constructing `ProseSpan` with the bit outside `prose.rs` (private field); a `match` on `Tag` in the transparency test missing no arm is not needed — use `matches!` with an explicit list so a new tag defaults to "not transparent".
+
+### Testing strategy
+| Layer | Covers | Needs |
+| :--- | :--- | :--- |
+| Unit `prose` | the join bit per boundary kind (witness table W1–W9) | — |
+| Unit `block` | P13 markup invariance; P9's separator law restricted to real separators; intraword witness | `proptest` |
+| Unit `analysis` | `parses_the_prose_not_the_markup` now sees `EXAMPLE_TEXT` | `testing::EXAMPLE_CONLLU` |
+| Integration | none new: `tests/cli.rs` derives its expectations from the library, so it stays green unchanged | — |
+| By hand | `cargo run -- analyze` on a file with bold words vs. the same file with the markup removed: equal counts | — |
+
+### Properties and witnesses
+- **P13 markup invariance:** ∀ words w₁…wₙ ∈ `[a-z]{1,8}`, ∀ wrapping mᵢ ∈ {none, `*w*`, `**w**`, `[w](u)`, `~~w~~` iff strikethrough is enabled in `options()`}, with punctuation p ∈ {none, `,`, `.`} after any word: `Block::from_spans(blocks(wrapped)[0]).text() == Block::from_spans(blocks(plain)[0]).text()`, and `analyze` gives the same `totals` for both. The expectation is the plain paragraph's own block, not a literal.
+- **P9′:** every block character that is not an inserted separator maps to its source character (unchanged); inserted separators exist only before spans whose bit is `false`.
+- Witnesses (`prose`, bit of each span after the first in the block):
+
+| # | Markdown | Bits | Block text |
+| :--- | :--- | :--- | :--- |
+| W1 | `**The proposal**, which` | `[true]` | `The proposal, which` |
+| W2 | `un*believ*able` | `[true, true]` | `unbelievable` |
+| W3 | `a [b](u) c` | `[true, true]` | `a b c` |
+| W4 | `a\*b` | `[true]` | `a*b` |
+| W5 | `AT&amp;T` | `[false]` | `AT T` |
+| W6 | `a  ⏎b` (hard break) | `[false]` | `a b` |
+| W7 | `a⏎b` (soft break) | `[false]` | `a b` |
+| W8 | ``a `x` b`` / `a <i>b</i> c` / `x ![alt](i) y` | all `false` | one space per dropped construct |
+| W9 | `see <http://x.y> now` (autolink, text dropped) | `[false]` | `see   now` — only checked for the bit |
+
+(W5–W9 texts: assert the bit, and for the texts derive "words equal" rather than exact spacing where more than one space is involved.)
+
+### Scenario coverage
+| Spec item | Check |
+| :--- | :--- |
+| *Block prose*: joined directly across inline delimiters | W1–W4, P13 |
+| *Block prose*: one space otherwise | W5–W9 |
+| Positions kept | P9′ (existing P9 generator) |
+| M2/M3a criteria | unchanged checks stay green; `parses_the_prose_not_the_markup` updated (F1.2) |
+
+### Planted violations (tick when the red was seen)
+| # | Plant | Must fail | Seen |
+| :--- | :--- | :--- | :--- |
+| 1 | bit always `false` | W1–W4 | [ ] |
+| 2 | bit always `true` | W5–W8 | [ ] |
+| 3 | `Image` in the transparent set | W8 (image) | [ ] |
+| 4 | a dropped `Text` does not clear the bit | W9, W5 | [ ] |
+| 5 | `Block::from_spans` ignores the bit | P13 | [ ] |
+| 6 | P13 generator without wrappings (mᵢ = none only) | plant #5 no longer fails P13 — shows the generator reaches the wrapped case (audit 005) | [ ] |
+
+### Coverage gap (run by hand)
+Inline constructs behind options that `options()` does not enable (footnotes, wikilinks, smart punctuation) are not generated; if an option is enabled later, its events fall into "not transparent" by the `matches!` default — a space, never a wrong join.
+By hand: analyze a real document with bold/italic/link words and the same document stripped of that markup; the counts must be equal.
+
+### Snippets
+```rust
+// src/prose.rs
+pub struct ProseSpan<'a> { text: &'a str, range: Range<usize>, joins_previous: bool }
+impl<'a> ProseSpan<'a> {
+    /// True iff only inline emphasis/strong/strikethrough/super-/subscript/link
+    /// delimiters lie between this span and the previous span of its block.
+    pub fn joins_previous(&self) -> bool;
+}
+fn is_transparent(tag: TagEnd | &Tag) -> bool  // matches!(…, Emphasis | Strong | Strikethrough | Superscript | Subscript | Link{..})
+
+// extract_blocks loop state: `joinable: bool`
+//   kept Text  → span.joins_previous = joinable && !current.is_empty(); joinable = true
+//   Start(t)/End(t) with is_transparent(t) → unchanged
+//   block boundary (existing close_unless) → current closed; joinable = false
+//   any other event, incl. a dropped Text or span_at == None → joinable = false
+// plain_text_blocks: joins_previous = false
+
+// src/block.rs, Block::from_spans
+//   for (i, span): if i > 0 && !span.joins_previous() { push separator ' ' }
+```
+
+### Tasks
+| ID | Scenario | Files | RED (must fail first) | GREEN | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| F1.0 | spec + audit | `spec.md`, `docs/audits/006-…`, this plan | — (docs) | definition corrected | done |
+| F1.1 | join bit per boundary kind | `src/prose.rs`, this plan (ticks) | W1–W9 bits against `joins_previous() → false` (W1–W4 red) | `joinable` state in `extract_blocks`; plants 1–4 | todo |
+| F1.2 | block joins on the bit | `src/block.rs`, `src/analysis.rs`, this plan | P13 + W texts red against the always-space join | `from_spans` uses the bit. `parses_the_prose_not_the_markup` changes because its fixture was keyed on the buggy `The proposal , which`; it now expects `EXAMPLE_TEXT` (the corrected text is the parser input the test always meant). Plants 5–6 | todo |
+| F1.3 | close-out | `docs/HANDOVER.md`, this plan | `just verify` | — | todo |
