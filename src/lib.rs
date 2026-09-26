@@ -6,6 +6,7 @@
 pub mod cli;
 pub mod position;
 pub mod prose;
+pub mod readability;
 pub mod summary;
 pub mod syllables;
 pub mod words;
