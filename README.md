@@ -1,7 +1,7 @@
 # vernier
 
 Readability and syntactic-complexity analyzer for Markdown, written in Rust.
-Status: spec 001 is a draft. M1 (prose extraction) and M2 (sentences, syllables, Flesch Reading Ease, Flesch-Kincaid Grade, Gunning Fog, `check` flags `LongSentence`) are implemented. See `docs/HANDOVER.md`.
+Status: spec 001 is a draft. M1 (prose extraction) and M2 (sentences, syllables, Flesch Reading Ease, Flesch-Kincaid Grade, Gunning Fog, `check` flags `LongSentence`) are implemented. M3a (mean dependency distance, tree depth, clause count and center-embedding, computed from a UD parse; no parser is wired to the command line until M3b) is implemented too. See `docs/HANDOVER.md`.
 
 ```sh
 vernier analyze README.md          # per file: spans, words, sentences, syllables, scores

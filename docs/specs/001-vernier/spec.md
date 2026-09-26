@@ -97,23 +97,23 @@ Count words, sentences and syllables, and compute FRE, FKGL, Gunning Fog and ave
 - Word and sentence boundaries from `unicode-segmentation`.
 - Syllables: a rule-based counter. Liang hyphenation is not used: it scored 63.0 % against the rule-based 93.8 % on 500 frequent CMUdict words ([research/metrics.md](research/metrics.md)).
 
-## M3a — Syntactic metrics on a token graph (Status: PLANNED)
+## M3a — Syntactic metrics on a token graph (Status: IMPLEMENTED)
 <a id="M3a"></a>
 
 Compute the dependency metrics as pure functions over a list of tokens, tested on hand-built parses, with no parser involved yet.
 
 **Acceptance Criteria:**
 
-- [ ] THE crate SHALL define `Token { id, form, lemma, upostag, head, deprel }` and a `Parser` trait returning the tokens of one sentence, so that the metrics depend on no parser implementation.
-- [ ] THE MDD function SHALL return the sum of |i − head(i)| over the N − 1 non-root content tokens, divided by N − 1; the file-level MDD SHALL be the total distance over all sentences divided by (content tokens − sentences).
-- [ ] WHEN a sentence has fewer than 2 content tokens, THE MDD function SHALL report MDD as absent.
-- [ ] THE depth function SHALL return the largest number of edges on a path from the root to any token (a root-only sentence has depth 0); the `--max-tree-depth` help text SHALL say that depth counts edges.
-- [ ] THE clause counter SHALL return the number of tokens whose `deprel` is a clausal relation.
-- [ ] WHEN a clausal dependent's subtree lies wholly between a nominal subject (`nsubj`, `nsubj:pass`) and the subject's head verb, THE detector SHALL report center-embedding with the subject, the verb and the number of words strictly between them.
-- [ ] WHEN the hand-built UD parse of "The proposal, which the executive committee rejected after extensive deliberation, caused significant delays." is given, THE detector SHALL report subject "proposal", verb "caused" and distance 8.
-- [ ] WHEN the input is not a tree (a cycle, several roots, or a head out of range), THE metric functions SHALL return an error instead of a value.
-- [ ] FOR every well-formed tree, THE depth SHALL be at most N − 1 and the MDD at least 1 (property test over generated trees).
-- [ ] WHEN MDD exceeds `--max-mdd` (default 3.0), depth exceeds `--max-tree-depth` (default 5), or the clause count exceeds `--max-clauses` (default 2), THE engine SHALL flag the sentence with `HighMdd`, `DeepTree` or `ClauseOverload`; center-embedding SHALL be flagged `CenterEmbedding`.
+- [x] THE crate SHALL define `Token { id, form, lemma, upostag, head, deprel }` and a `Parser` trait returning the tokens of one sentence, so that the metrics depend on no parser implementation.
+- [x] THE MDD function SHALL return the sum of |i − head(i)| over the N − 1 non-root content tokens, divided by N − 1; the file-level MDD SHALL be the total distance over all sentences divided by (content tokens − sentences).
+- [x] WHEN a sentence has fewer than 2 content tokens, THE MDD function SHALL report MDD as absent.
+- [x] THE depth function SHALL return the largest number of edges on a path from the root to any token (a root-only sentence has depth 0); the `--max-tree-depth` help text SHALL say that depth counts edges.
+- [x] THE clause counter SHALL return the number of tokens whose `deprel` is a clausal relation.
+- [x] WHEN a clausal dependent's subtree lies wholly between a nominal subject (`nsubj`, `nsubj:pass`) and the subject's head verb, THE detector SHALL report center-embedding with the subject, the verb and the number of words strictly between them.
+- [x] WHEN the hand-built UD parse of "The proposal, which the executive committee rejected after extensive deliberation, caused significant delays." is given, THE detector SHALL report subject "proposal", verb "caused" and distance 8.
+- [x] WHEN the input is not a tree (a cycle, several roots, or a head out of range), THE metric functions SHALL return an error instead of a value.
+- [x] FOR every well-formed tree, THE depth SHALL be at most N − 1 and the MDD at least 1 (property test over generated trees).
+- [x] WHEN MDD exceeds `--max-mdd` (default 3.0), depth exceeds `--max-tree-depth` (default 5), or the clause count exceeds `--max-clauses` (default 2), THE engine SHALL flag the sentence with `HighMdd`, `DeepTree` or `ClauseOverload`; center-embedding SHALL be flagged `CenterEmbedding`.
 
 ## M3b — Parser integration and model handling (Status: PLANNED)
 <a id="M3b"></a>

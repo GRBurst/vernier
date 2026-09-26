@@ -285,4 +285,4 @@ This plan's ticks go in a separate commit when a task would exceed 5 files.
 | T7 | `--max-tree-depth` help says edges | `src/cli.rs` | `max_tree_depth_help_says_edges` | doc comment | done |
 | T8 | syntactic flags + thresholds | `src/analysis.rs`, `src/main.rs` | P13 against `syntactic_flags = vec![]`; `describe_syntactic` message tests in `main.rs` | `Thresholds` fields, `SyntacticFlag`, `syntactic_flags`, `SentenceSyntax`, `syntax: None` everywhere, `main` builds full `Thresholds` and renders syntactic flags | done |
 | T9 | engine with a parser | `src/analysis.rs` | P14, `example_is_center_embedded_and_high_mdd_only_below_8_3`, `parses_the_prose_not_the_markup`, parser/malformed errors against `analyze_parsed` = `Ok(analyze(..))` | `analyze_with`, `analyze_parsed`, `AnalysisError`, `dependency_distance` | done |
-| T10 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | todo |
+| T10 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | done |

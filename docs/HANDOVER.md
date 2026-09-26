@@ -2,9 +2,9 @@
 
 ## 1. Preconditions verified
 
-- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 91 tests (79 lib unit, 1 bin, 11 integration).
+- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 131 tests (117 lib unit, 3 bin, 11 integration).
 - `PROPTEST_CASES=3000 cargo test --lib` passed.
-- Every planted violation in `docs/specs/001-vernier/plan-M2.md` was seen to fail, then reverted. #1 was an equivalent mutation and got a substitute (audit 005).
+- Every planted violation in `docs/specs/001-vernier/plan-M3a.md` was seen to fail (12/12, with the proptest seeds moved aside), then reverted.
 - Nested `devenv shell -- …` fails in the agent sandbox. Commits are unsigned (D13) and the pre-commit hook runs `just verify`.
 
 ## 2. What changed
@@ -25,6 +25,11 @@
   - `src/summary.rs` renders two more lines per file. `check` prints `path:line:col: LongSentence: sentence has N words (max M)` and exits 1; an unreadable file still wins with exit 2.
   - `docs/specs/001-vernier/measurements/`: 500 CMUdict words, the generator and CMU's license. Agreement is 469/500 = 93.8 %; the misses are listed in `syllables.md`.
   - Spec fix in place (audit 004): line breaks in block prose read as spaces, and blank lines separate plain-text blocks.
+- **M3a IMPLEMENTED** (plan `docs/specs/001-vernier/plan-M3a.md`, commits a57a0a1..271ef96):
+  - `src/dependency.rs`: `Token`, the `Parser` trait, `DependencyTree::new` (rejects empty, ids out of order, head out of range, several roots, cycle — one `TreeError` each).
+  - `src/syntax.rs`: content projection (drop `PUNCT`, renumber, reattach; a root when only `PUNCT` ancestors), `DependencyDistance` monoid (file MDD pools, never averages), `depth` in edges, `clause_count`, `center_embeddings`, `SyntacticMetrics`.
+  - `src/analysis.rs`: `SyntacticFlag` (carries its value), `syntactic_flags`, `analyze_parsed(.., &impl Parser)`; `analyze` unchanged. `main.rs` renders the four messages (unit-tested only; no CLI path has a parser until M3b). `--max-tree-depth` help says edges.
+  - The example parse is UDPipe 2's real output (LINDAT, `english-ewt-ud-2.17`): MDD 32/12 ≈ 2.67 (so `HighMdd` is not raised at 3.0), depth 4, 1 clause, center-embedding proposal/caused/8.
 - A changed M1 test: `check … --max-sentence-len 10` on sample.md now exits 1 (sample.md has a 13-word sentence). The old test passes 30, and a new test asserts the flag at 10.
 
 ## 3. How to check
@@ -44,14 +49,16 @@ cargo run -q -- check tests/fixtures/long.md; echo $?
 ## Open tasks
 
 - Phase 2 for spec 001 is owed (BACKLOG item 2).
-- User review of M1 and M2 → `DONE`. By hand:
+- User review of M1, M2 and M3a → `DONE`. By hand:
   - skim the miss list in `measurements/syllables.md`;
   - run `vernier check` on one of your own Markdown files and skim the flagged positions. `check README.md docs/specs/001-vernier/spec.md` flags 28 sentences; they looked right on a spot check.
+- M3a decisions to confirm (plan-M3a "Decisions made"): a content token with only `PUNCT` ancestors becomes a projected root; `words_between` counts tokens whose form has a letter or digit; the subject's head is not required to be a `VERB`.
 - M3b parser choice (UDPipe via FFI needs an ADR for `unsafe`, D9), to be decided before M3b.
 
 ## Next action
 
-M3a (syntactic metrics on hand-built token graphs, no parser): write `docs/specs/001-vernier/plan-M3a.md` with the tdd-implementation-planner skill, then implement. M4's surface parts depend on M3b's parse, so M3a comes next.
+1. Block-prose join fix (found in M3a T9): spans are joined with one space even where only inline markup separates them, so `**The proposal**, which` reaches sentences (and M3b's parser) as `The proposal , which`. Fix the *Block prose* definition in place (spec is Draft), audit 006, then the code (follow-up section in `plan-M2.md`).
+2. M3b spike report (udpipe vs ONNX/`ort`), committed; the user chooses the route from it.
 
 ## Known-bad approaches
 
