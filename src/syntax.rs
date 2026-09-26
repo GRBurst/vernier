@@ -66,7 +66,26 @@ struct ContentTree<'t> {
     tokens: Vec<ContentToken<'t>>,
 }
 
+/// The largest number of edges from a projected root down to any content token (0 for a
+/// root-only sentence).
+pub fn depth(tree: &DependencyTree) -> usize {
+    let projection = content_tree(tree);
+    (1..=projection.tokens.len())
+        .map(|id| projection.edges_to_root(id))
+        .max()
+        .unwrap_or(0)
+}
+
 impl ContentTree<'_> {
+    /// The number of edges from content token `id` up to its projected root.
+    fn edges_to_root(&self, id: usize) -> usize {
+        std::iter::successors(Some(id), |&k| {
+            Some(self.tokens[k - 1].head).filter(|&h| h != 0)
+        })
+        .skip(1)
+        .count()
+    }
+
     /// Every (content id, content head) pair whose head is not the root.
     fn dependencies(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.tokens
@@ -195,6 +214,26 @@ mod tests {
         assert_eq!(file.mean(), Some(7.0 / 4.0), "{file:?}");
     }
 
+    /// Given the UDPipe 2 parse of the M3a example sentence
+    /// When its depth is measured
+    /// Then it is 4 edges (caused → proposal → rejected → committee → the)
+    #[test]
+    fn example_sentence_has_depth_4() {
+        assert_eq!(depth(&tree(tokens_from_conllu(EXAMPLE_CONLLU))), 4);
+    }
+
+    /// Given a root-only sentence `1 Go root`, and the same with a `PUNCT` token `2 ! →1`
+    /// When its depth is measured
+    /// Then it is 0
+    #[test]
+    fn root_only_sentence_has_depth_0() {
+        let bare = "1 Go go VERB _ _ 0 root";
+        let punctuated = "1 Go go VERB _ _ 0 root\n2 ! ! PUNCT _ _ 1 punct";
+        for conllu in [bare, punctuated] {
+            assert_eq!(depth(&tree(tokens_from_conllu(conllu))), 0, "{conllu:?}");
+        }
+    }
+
     fn distance_counts() -> impl Strategy<Value = DependencyDistance> {
         (prop_oneof![1 => Just(0usize), 3 => 1usize..100], 0usize..10).prop_map(
             |(dependencies, extra)| DependencyDistance {
@@ -303,6 +342,25 @@ mod tests {
             let star_mdd = dependency_distance(&star(n)).mean().expect("n ≥ 2");
             prop_assert!(close(chain_mdd, 1.0), "{}", chain_mdd);
             prop_assert!(close(star_mdd, n as f64 / 2.0), "{}", star_mdd);
+        }
+
+        /// Given any well-formed tree with N ≥ 1 content tokens
+        /// When its depth is measured
+        /// Then it is at most N − 1
+        #[test]
+        fn depth_is_at_most_one_less_than_the_content_tokens(tokens in well_formed_tree()) {
+            let n = tokens.iter().filter(|t| !t.is_punct()).count();
+            prop_assume!(n >= 1);
+            let d = depth(&tree(tokens));
+            prop_assert!(d < n, "depth {} with {} content tokens", d, n);
+        }
+
+        /// Given a chain of n ≥ 1 words
+        /// When its depth is measured
+        /// Then it is n − 1, so the bound N − 1 is tight
+        #[test]
+        fn chain_depth_is_one_less_than_its_length(n in 1usize..40) {
+            prop_assert_eq!(depth(&chain(n)), n - 1);
         }
 
         /// Given any three dependency distances

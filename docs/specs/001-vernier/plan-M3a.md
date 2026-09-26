@@ -125,7 +125,7 @@ Each names the concrete input where the mutant differs (audit 005).
 - [x] Reattach only one level (`head = tokens[h].head` once, no loop) → P4 FAIL (input: `1 a →2, 2 , PUNCT →3, 3 ; PUNCT →4, 4 b root`: a's head must be b).
 - [x] Divide the MDD total by N instead of by the dependencies → `example_sentence_has_mdd_32_over_12` FAIL (32/13) and P7 chain FAIL.
 - [x] File MDD as the mean of sentence MDDs → `file_mdd_pools_distances_not_means` FAIL (1.5 ≠ 1.75). Planted in `DependencyDistance::sum` (the only place a file MDD is formed): the sum of the parts' means over the number of parts; each sentence's own sum is over parts of 1 dependency, where both agree, so only the pooling test and P8 failed.
-- [ ] Depth counts nodes (root = 1) → P9 root-only FAIL.
+- [x] Depth counts nodes (root = 1) → P9 root-only FAIL.
 - [ ] `is_clausal` as `deprel.ends_with("comp") || …` → P10 `xcomp` FAIL.
 - [ ] `words_between` = `v − s − 1` over original ids → example witness FAIL (10 ≠ 8).
 - [ ] Drop the `hi < v` check → P12 crossing case FAIL (reported).
@@ -279,7 +279,7 @@ This plan's ticks go in a separate commit when a task would exceed 5 files.
 | T1 | well-formed trees accepted, malformed rejected | `src/dependency.rs`, `src/testing.rs`, `src/lib.rs` | P1, P2 against `new` returning `Err(Empty)` / `Ok` always | `Token`, `Parser`, `TreeError`, `DependencyTree::new` | done |
 | T2 | content projection | `src/syntax.rs`, `src/lib.rs` | P3, P4 against a projection that keeps `PUNCT` | `content_tree` | done |
 | T3 | MDD + file MDD | `src/syntax.rs` | example 32/12, `single_word_sentence_has_no_mdd`, P6, P7, P8, `file_mdd_pools_distances_not_means` against `total = 0` | `DependencyDistance`, `dependency_distance` | done |
-| T4 | depth | `src/syntax.rs` | example 4, P9 against `depth = 0` | `depth` | todo |
+| T4 | depth | `src/syntax.rs` | example 4, P9 against `depth = 0` | `depth` | done |
 | T5 | clause count | `src/syntax.rs` | P10, example 1 against `is_clausal = false` | `is_clausal`, `clause_count` | todo |
 | T6 | center-embedding | `src/syntax.rs` | example witness, P11, P12 against `vec![]` | `center_embeddings`, `words_between`; then `SyntacticMetrics` + P5 | todo |
 | T7 | `--max-tree-depth` help says edges | `src/cli.rs` | `max_tree_depth_help_says_edges` | doc comment | todo |
