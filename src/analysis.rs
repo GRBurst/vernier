@@ -6,6 +6,7 @@ use std::ops::Range;
 
 use crate::block::Block;
 use crate::dependency::{DependencyTree, Parser, TreeError};
+use crate::nominalization::{NominalizationCount, Stoplist, surface_nominalizations};
 use crate::prose::{SourceFormat, blocks, prose};
 use crate::readability::{Readability, SurfaceCounts, readability};
 use crate::sentence::{Sentence, sentences};
@@ -61,10 +62,12 @@ pub struct SentenceAnalysis {
     pub readability: Option<Readability>,
     pub flags: Vec<Flag>,
     pub syntax: Option<SentenceSyntax>,
+    /// Its nominalizations (surface words without a parse, `NOUN` tokens with one) over its words.
+    pub nominalizations: NominalizationCount,
 }
 
 /// One file's sentences, the sum of their counts, and the file's scores computed from that sum;
-/// `dependency_distance` sums the sentences' distances and is `None` when nothing was parsed.
+/// `dependency_distance` and `passives` sum the sentences' and are `None` when nothing was parsed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileAnalysis {
     pub spans: usize,
@@ -72,6 +75,8 @@ pub struct FileAnalysis {
     pub totals: SurfaceCounts,
     pub readability: Option<Readability>,
     pub dependency_distance: Option<DependencyDistance>,
+    pub nominalizations: NominalizationCount,
+    pub passives: Option<usize>,
 }
 
 /// Why a file could not be analyzed with a parser.
@@ -130,6 +135,7 @@ fn analyze_with<E>(
     thresholds: &Thresholds,
     syntax: impl Fn(&Sentence<'_>) -> Result<Option<SentenceSyntax>, E>,
 ) -> Result<FileAnalysis, E> {
+    let stoplist = Stoplist::committed();
     let sentences = each_sentence(source, format, |sentence| {
         let counts = sentence_counts(sentence);
         Ok(SentenceAnalysis {
@@ -138,15 +144,21 @@ fn analyze_with<E>(
             readability: readability(counts),
             flags: flags(counts, thresholds),
             syntax: syntax(sentence)?,
+            nominalizations: NominalizationCount {
+                nominalizations: surface_nominalizations(words(sentence.text()), &stoplist),
+                words: counts.words,
+            },
         })
     })?;
     let totals = sentences.iter().map(|s| s.counts).sum();
     Ok(FileAnalysis {
         spans: prose(source, format).len(),
-        sentences,
         totals,
         readability: readability(totals),
         dependency_distance: None,
+        nominalizations: sentences.iter().map(|s| s.nominalizations).sum(),
+        sentences,
+        passives: None,
     })
 }
 
@@ -243,7 +255,7 @@ pub fn syntactic_flags(metrics: &SyntacticMetrics, thresholds: &Thresholds) -> V
 mod tests {
     use super::*;
     use crate::dependency::Token;
-    use crate::testing::{EXAMPLE_CONLLU, EXAMPLE_TEXT, tokens_from_conllu};
+    use crate::testing::{EXAMPLE_CONLLU, EXAMPLE_TEXT, NOMZ_TEXT, tokens_from_conllu};
     use crate::words::count_words;
     use proptest::prelude::*;
 
@@ -430,6 +442,45 @@ mod tests {
             parsed.dependency_distance,
             Some(DependencyDistance::default())
         );
+    }
+
+    /// Given the NOMZ sentence
+    /// When it is analyzed without a parse
+    /// Then it has 4 nominalizations of 14 words (commission, decisions, implementation,
+    /// consideration), as does the file, and passive voice is absent
+    #[test]
+    fn counts_surface_nominalizations_of_the_nomz_sentence() {
+        let file = md(NOMZ_TEXT, 25);
+        let expected = NominalizationCount {
+            nominalizations: 4,
+            words: 14,
+        };
+        assert_eq!(file.sentences.len(), 1);
+        assert_eq!(file.sentences[0].nominalizations, expected);
+        assert_eq!(file.nominalizations, expected);
+        assert_eq!(file.passives, None);
+    }
+
+    /// Paragraphs of sentences mixing nominalizations (plain, plural, possessive, stoplisted,
+    /// capitalized) with other words.
+    fn nominal_document() -> impl Strategy<Value = String> {
+        let word = prop::sample::select(vec![
+            "the",
+            "decisions",
+            "implementation",
+            "committee's",
+            "Consideration",
+            "cities",
+            "rations",
+            "was",
+            "written",
+            "we",
+            "review",
+            "activities",
+        ]);
+        let sentence = prop::collection::vec(word, 1..15).prop_map(|w| format!("{}.", w.join(" ")));
+        let para = prop::collection::vec(sentence, 1..4).prop_map(|s| s.join(" "));
+        prop::collection::vec(para, 0..4).prop_map(|p| p.join("\n\n"))
     }
 
     /// The analysis without anything that only a parse provides.
@@ -631,6 +682,25 @@ mod tests {
                 sum = sum + syntax.metrics.distance;
             }
             prop_assert_eq!(parsed.dependency_distance, Some(sum));
+        }
+
+        /// Given generated paragraphs with nominalizations
+        /// When the file is analyzed without a parse
+        /// Then each sentence counts the nominalizations among its words over its M2 words, the
+        /// file's count is their sum over the file's words, and passive voice is absent
+        #[test]
+        fn file_nominalizations_are_the_sum_of_the_sentences(doc in nominal_document()) {
+            let file = md(&doc, 25);
+            let stoplist = Stoplist::committed();
+            for s in &file.sentences {
+                let text = &doc[s.source_range.clone()];
+                prop_assert_eq!(s.nominalizations.words, s.counts.words);
+                prop_assert_eq!(s.nominalizations.nominalizations, surface_nominalizations(words(text), &stoplist));
+            }
+            let sum: NominalizationCount = file.sentences.iter().map(|s| s.nominalizations).sum();
+            prop_assert_eq!(file.nominalizations, sum);
+            prop_assert_eq!(file.nominalizations.words, file.totals.words);
+            prop_assert_eq!(file.passives, None);
         }
 
         /// Given generated Markdown paragraphs

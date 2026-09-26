@@ -239,6 +239,7 @@ mod tests {
                 metrics,
                 flags: syntactic,
             }),
+            nominalizations: vernier::nominalization::NominalizationCount::default(),
         }
     }
 
@@ -263,6 +264,8 @@ mod tests {
             totals: vernier::readability::SurfaceCounts::default(),
             readability: None,
             dependency_distance: None,
+            nominalizations: vernier::nominalization::NominalizationCount::default(),
+            passives: None,
         };
         let lines = diagnostics(Path::new("f.md"), source, &analysis, &THRESHOLDS).unwrap();
         assert_eq!(
