@@ -106,8 +106,9 @@ Expected rejections: building a `Block` or `Sentence` outside its module (privat
 
 ## Planted violations (tick when the red was seen)
 
-- [ ] Drop the leftmost-first order (try `ia` before `.y[aeiou]`) → P3 FAIL.
-- [ ] Remove `max(1, …)` in `count_syllables` → P2 FAIL (`nth`, `gps` and digit strings have no vowel run).
+- [ ] Drop the leftmost-first order (try `ia` before `.y[aeiou]`) → P3 FAIL. **Not observable** (planted, P3 stayed green): no two of the nine alternatives can match at the same position, so their order is an equivalent mutation (also none of 117,493 CMUdict words changes).
+  - [x] Substitute: advance the scan by 1 instead of the match length (overlapping matches) → P3 FAIL on the witness table (`cronyism`, `dandyism`, `mccarthyism`, `shiyuan`).
+- [x] Remove `max(1, …)` in `count_syllables` → P2 FAIL (`nth`, `gps` and digit strings have no vowel run).
 - [ ] Subtract the suffix for `jumped` (`-ed` after any letter) → `non_syllabic_suffix_is_not` FAIL.
 - [ ] `84.6` → `84.0` in FRE → witness FAIL.
 - [ ] Return `Some` with `NaN` for zero sentences → P6 FAIL.
@@ -232,7 +233,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | T0 | spec fix for plain-text line breaks | `spec.md`, `docs/audits/004-…`, this plan | — (docs) | definition corrected | done |
 | T1 | `words()` iterator (refactor) | `src/words.rs` | P1 against a `words` stub yielding nothing | `count_words = words().count()`; existing P6 still green (before/after evidence) | done |
-| T2 | syllable counter | `src/syllables.rs`, `src/lib.rs` | P2, P3 against `fn count_syllables(_) -> usize { 0 }` | port | todo |
+| T2 | syllable counter | `src/syllables.rs`, `src/lib.rs` | P2, P3 against `fn count_syllables(_) -> usize { 0 }` | port | done |
 | T3 | 500-word reference + measurement | `measurements/{sample_cmudict.py, cmudict-500.tsv, CMUDICT-LICENSE, syllables.md}`, `src/syllables.rs` (test) | agreement test against a TSV with 60 rows corrupted (planted), then real TSV | run generator, record rate and misses | todo |
 | T4 | complex word | `src/syllables.rs` | suffix/proper-noun witnesses + P4 against `is_complex = count ≥ 3` | `has_syllabic_suffix`, capitalization | todo |
 | T5 | readability formulas + absence | `src/readability.rs`, `src/lib.rs` | witness, P5, P6, P7 against a stub | formulas, `Add`, `Sum` | todo |
