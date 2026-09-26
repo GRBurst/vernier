@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6d673e1d170d4d83857e818db073f8563efe74f3fb44e45d5cf8a13fad973c4c # shrinks to c = SurfaceCounts { words: 1, sentences: 1, syllables: 0, complex_words: 0 }
+cc 6f8b2332a1190461feca60d3ab5f69d14a1250cbf274d28cb1cb27b442eb502b # shrinks to a = SurfaceCounts { words: 0, sentences: 0, syllables: 0, complex_words: 0 }, b = SurfaceCounts { words: 0, sentences: 0, syllables: 0, complex_words: 1 }, c = SurfaceCounts { words: 0, sentences: 0, syllables: 0, complex_words: 0 }
+cc 52ce236fdc49c4b2fd4c0ef90d06d6da36b7f804c35db84177a663be72ed02b3 # shrinks to c = SurfaceCounts { words: 1, sentences: 1, syllables: 1, complex_words: 0 }, delta = 1
+cc c5d6c3fbb3ef51dd24f59f0a146f69f3639aee1516bfd96617fccb4db827a503 # shrinks to c = SurfaceCounts { words: 1, sentences: 1, syllables: 1, complex_words: 0 }
+cc 1800aae09149eb87ccc651e4b790cc6d2d6b3fb2419494e699f15b8f026317f3 # shrinks to c = SurfaceCounts { words: 1, sentences: 1, syllables: 1, complex_words: 0 }, more = 1
+cc adbc305f6f443bd6408d743da145961ba87eaad731b82b4eb917b1ed95c47752 # shrinks to c = SurfaceCounts { words: 1, sentences: 0, syllables: 0, complex_words: 0 }

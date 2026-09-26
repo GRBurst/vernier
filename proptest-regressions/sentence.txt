@@ -4,5 +4,4 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc 016d97276efdd5f11faf90be1f961ec572caa2174af426065919d7621aca8820 # shrinks to doc = Doc { markdown: "alpha 日本\n", kept: ["alpha", "日本"] }
-cc 4702e25216cc0135339fd78369ef77f2f38bbbcb36cbf49bdf65fb0a395b2b7b # shrinks to doc = Doc { markdown: "\n", kept: [] }
+cc 002553a372d7a272cd14955cced7d98fbf2414c7622b9c1b69fed01c670067be # shrinks to (src, format) = ("`code.` Beta\n", PlainText)
