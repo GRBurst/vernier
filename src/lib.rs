@@ -3,6 +3,7 @@
 //! The pure core: prose extraction, word counting and source positions.
 //! All I/O lives in `main.rs` (ENGINEERING.md §6).
 
+pub mod analysis;
 pub mod block;
 pub mod cli;
 pub mod position;
