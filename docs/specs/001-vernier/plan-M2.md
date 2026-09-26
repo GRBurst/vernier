@@ -228,6 +228,7 @@ It also prints the Python `regex_counter` value for the first 40 words, which be
 ## Tasks
 
 One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13); `just verify` must pass at every commit (the pre-commit hook runs it).
+All tasks T0–T12 done 2026-09-27 (91 tests); `just verify` green. Planted violations #1 and #5 did not fail as predicted: [audit 005](../../audits/005-planted-violations-predicted-unchecked.md).
 
 | ID | Scenario | Files | RED (must fail first) | GREEN | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -243,4 +244,4 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | T9 | analysis + `LongSentence` | `src/analysis.rs`, `src/lib.rs` | P12, `empty_file_has_absent_metrics` | `analyze` | done |
 | T10 | `analyze` renders metrics | `src/summary.rs`, `src/main.rs`, `tests/cli.rs` | `analyze_prints_surface_metrics` (expectation from the library); M1's test unchanged | `render` lines 2–3 | done |
 | T11 | `check` flags and exits 1 | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/long.md` | `check_flags_a_long_sentence_and_exits_1`, `…max_sentence_len_raises_the_bar`, `check_on_sample_exits_0` | `check` loop | done |
-| T12 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | todo |
+| T12 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | done |
