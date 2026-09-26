@@ -48,7 +48,7 @@ The metric values in this example are illustrative; the criteria below, not the 
 ## Definitions
 
 - **Word:** a UAX #29 word segment containing at least one alphabetic or numeric character; punctuation and whitespace segments are not words.
-- **Block prose:** the prose spans of one paragraph (in a list item or blockquote too), joined in source order with one space between consecutive spans; every character keeps its source position. A plain-text file is one block.
+- **Block prose:** the prose spans of one paragraph (in a list item or blockquote too), joined in source order with one space between consecutive spans, with every line feed and carriage return read as a space; every character keeps its source position. In a plain-text file, blank lines (lines of only whitespace) separate blocks.
 - **Sentence:** a UAX #29 sentence segment of one block's prose containing at least one word, where a segment ending in an abbreviation from the committed list (`Mr.` `Mrs.` `Ms.` `Dr.` `Prof.` `St.` `e.g.` `i.e.` `etc.` `vs.` `Fig.` `No.` `cf.`) is merged with the next segment. This split is authoritative: each sentence goes to the parser pre-segmented, so sentences and positions are the same with or without a model.
 - **Prose span:** a run of text from a `Text` event inside a paragraph, list item or blockquote, with its byte range in the source file.
 - **Position:** 1-based line and 1-based column, the column counted in Unicode scalar values (as rustc does).
