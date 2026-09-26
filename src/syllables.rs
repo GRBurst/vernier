@@ -234,6 +234,41 @@ mod tests {
         }
     }
 
+    /// The committed reference list: 500 frequent words, each with its CMUdict syllable counts.
+    const REFERENCE: &str = include_str!("../docs/specs/001-vernier/measurements/cmudict-500.tsv");
+
+    fn reference() -> Vec<(&'static str, Vec<usize>)> {
+        REFERENCE
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .map(|line| {
+                let (word, counts) = line.split_once('\t').unwrap();
+                (
+                    word,
+                    counts.split(',').map(|n| n.parse().unwrap()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// Given the committed list of 500 frequent CMUdict words
+    /// When each word's syllables are counted
+    /// Then at least 90 % of the counts equal one of the word's CMUdict pronunciations
+    #[test]
+    fn agrees_with_cmudict_on_the_reference_list() {
+        let words = reference();
+        let misses: Vec<String> = words
+            .iter()
+            .filter(|(word, counts)| !counts.contains(&count_syllables(word)))
+            .map(|(word, counts)| format!("{word} {} {counts:?}", count_syllables(word)))
+            .collect();
+        let agreed = words.len() - misses.len();
+        println!("agreement: {agreed}/{}", words.len());
+        println!("misses (word, counted, CMUdict): {misses:?}");
+        assert_eq!(words.len(), 500);
+        assert!(agreed * 10 >= words.len() * 9, "{agreed}/{}", words.len());
+    }
+
     fn with_a_letter() -> impl Strategy<Value = String> {
         "[a-zA-Z0-9'éıßü]{0,8}[a-zA-Z][a-zA-Z0-9'éıßü]{0,8}"
     }
