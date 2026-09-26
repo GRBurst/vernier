@@ -13,6 +13,27 @@ pub fn count_syllables(word: &str) -> usize {
         .max(1)
 }
 
+/// Whether `word` is complex (Gunning Fog): 3 or more syllables once a final syllabic suffix is
+/// subtracted, and not capitalized unless it opens the sentence (Gunning's proper-noun rule).
+pub fn is_complex(word: &str, is_sentence_initial: bool) -> bool {
+    let is_proper_noun = is_capitalized(word) && !is_sentence_initial;
+    let suffix = usize::from(has_syllabic_suffix(&word.to_lowercase()));
+    !is_proper_noun && count_syllables(word).saturating_sub(suffix) >= 3
+}
+
+fn is_capitalized(word: &str) -> bool {
+    word.chars().next().is_some_and(char::is_uppercase)
+}
+
+/// A final suffix that is a syllable of its own: `-ing`; `-ed` after `t` or `d`; `-es` after
+/// `s`, `x`, `z`, `ch`, `sh`, `c` or `g` (the spec's `ce`/`ge` stems, as in `plac|es`).
+fn has_syllabic_suffix(lower: &str) -> bool {
+    const SUFFIXES: [&str; 10] = [
+        "ing", "ted", "ded", "ses", "xes", "zes", "ches", "shes", "ces", "ges",
+    ];
+    SUFFIXES.iter().any(|suffix| lower.ends_with(suffix))
+}
+
 fn is_vowel(c: char) -> bool {
     matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'y')
 }
@@ -269,6 +290,61 @@ mod tests {
         assert!(agreed * 10 >= words.len() * 9, "{agreed}/{}", words.len());
     }
 
+    /// Given words of 3 counted syllables ending in each syllabic suffix of the spec
+    /// When their complexity is decided
+    /// Then the suffix is subtracted and they are not complex, while one more syllable makes them complex
+    #[test]
+    fn syllabic_suffix_is_subtracted() {
+        let three_with_suffix = [
+            "wandering",  // -ing
+            "invented",   // -ed after t
+            "recorded",   // -ed after d
+            "trespasses", // -es after s
+            "paradoxes",  // -es after x
+            "amazes",     // -es after z
+            "avalanches", // -es after ch
+            "diminishes", // -es after sh
+            "sentences",  // -es after c (stem "sentence")
+            "packages",   // -es after g (stem "package")
+        ];
+        for word in three_with_suffix {
+            assert_eq!(count_syllables(word), 3, "{word}");
+            assert!(!is_complex(word, false), "{word}");
+        }
+        for word in ["understanding", "separated"] {
+            assert_eq!(count_syllables(word), 4, "{word}");
+            assert!(is_complex(word, false), "{word}");
+        }
+    }
+
+    /// Given words ending in `-ed` or `-es` that are no syllable of their own
+    /// When their complexity is decided
+    /// Then nothing is subtracted
+    #[test]
+    fn non_syllabic_suffix_is_not() {
+        for word in ["jumped", "cakes", "developed", "celebrates"] {
+            assert!(!has_syllabic_suffix(word), "{word}");
+        }
+        for word in ["developed", "celebrates"] {
+            assert_eq!(count_syllables(word), 3, "{word}");
+            assert!(is_complex(word, false), "{word}");
+        }
+    }
+
+    /// Given a capitalized word of 4 counted syllables
+    /// When its complexity is decided inside and at the start of a sentence
+    /// Then it is not complex inside the sentence (a proper noun) and complex at its start
+    #[test]
+    fn capitalized_non_initial_is_not_complex() {
+        assert_eq!(count_syllables("Australia"), 4);
+        assert!(!is_complex("Australia", false));
+        assert!(is_complex("Australia", true));
+    }
+
+    fn lowercase_word() -> impl Strategy<Value = String> {
+        "[a-z]{1,12}(ing|ed|ted|ded|es|ses|ches|ces|ges|s)?"
+    }
+
     fn with_a_letter() -> impl Strategy<Value = String> {
         "[a-zA-Z0-9'éıßü]{0,8}[a-zA-Z][a-zA-Z0-9'éıßü]{0,8}"
     }
@@ -288,6 +364,30 @@ mod tests {
         #[test]
         fn digits_only_is_one(word in "[0-9]{1,12}") {
             prop_assert_eq!(count_syllables(&word), 1);
+        }
+
+        /// Given any word, at any sentence position
+        /// When it is complex
+        /// Then it has at least 3 counted syllables
+        #[test]
+        fn complex_words_have_three_syllables(word in with_a_letter(), initial in any::<bool>()) {
+            prop_assert!(!is_complex(&word, initial) || count_syllables(&word) >= 3);
+        }
+
+        /// Given a word with a capital first letter
+        /// When it is not the first word of its sentence
+        /// Then it is never complex
+        #[test]
+        fn capitalized_words_are_complex_only_initially(word in "[A-ZÄÉ][a-z]{0,12}(ing|es|ted)?") {
+            prop_assert!(!is_complex(&word, false));
+        }
+
+        /// Given a lowercase word
+        /// When its complexity is decided at and after the start of a sentence
+        /// Then the position does not matter
+        #[test]
+        fn position_matters_only_for_capitalized_words(word in lowercase_word()) {
+            prop_assert_eq!(is_complex(&word, true), is_complex(&word, false));
         }
 
         /// Given a word whose upper case lowercases back to its lower case
