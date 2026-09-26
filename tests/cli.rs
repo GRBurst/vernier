@@ -148,8 +148,9 @@ fn a_non_utf8_file_is_unreadable() {
     );
 }
 
-/// Given a readable file and every M5 flag
-/// When `vernier check` runs (no rule exists in M1)
+/// Given a readable file whose longest sentence has 13 words, and every M5 flag with a
+/// sentence limit above that
+/// When `vernier check` runs
 /// Then it accepts the flags, flags nothing and exits 0
 #[test]
 fn check_accepts_every_m5_flag_and_passes_without_rules() {
@@ -159,7 +160,7 @@ fn check_accepts_every_m5_flag_and_passes_without_rules() {
             "--format",
             "compact",
             "--max-sentence-len",
-            "10",
+            "30",
             "--max-mdd",
             "2.0",
             "--max-tree-depth",
@@ -177,4 +178,87 @@ fn check_accepts_every_m5_flag_and_passes_without_rules() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// Runs `vernier check` and returns its exit code and stdout.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn check(args: &[&str], files: &[&Path]) -> (Option<i32>, String) {
+    let out = vernier(&[&["check"], args].concat(), files);
+    (out.status.code(), String::from_utf8(out.stdout).unwrap())
+}
+
+/// Given a file with one 30-word sentence, starting on line 3, column 20
+/// When `vernier check` runs with the default limit of 25 words
+/// Then it prints that sentence's position and LongSentence on stdout and exits 1
+#[test]
+fn check_flags_a_long_sentence_and_exits_1() {
+    let path = fixture("long.md");
+    assert_eq!(
+        check(&[], &[&path]),
+        (
+            Some(1),
+            format!(
+                "{}:3:20: LongSentence: sentence has 30 words (max 25)\n",
+                path.display()
+            )
+        )
+    );
+}
+
+/// Given the file with one 30-word sentence
+/// When `vernier check` runs with `--max-sentence-len` 29, then 30
+/// Then 29 flags it and exits 1, while 30 flags nothing and exits 0
+#[test]
+fn max_sentence_len_raises_the_bar() {
+    let path = fixture("long.md");
+    let (code, stdout) = check(&["--max-sentence-len", "29"], &[&path]);
+    assert_eq!(code, Some(1));
+    assert!(
+        stdout.ends_with("LongSentence: sentence has 30 words (max 29)\n"),
+        "{stdout}"
+    );
+    assert_eq!(
+        check(&["--max-sentence-len", "30"], &[&path]),
+        (Some(0), String::new())
+    );
+}
+
+/// Given the sample file, whose longest sentence has 13 words
+/// When `vernier check` runs with the default limit of 25
+/// Then it flags nothing and exits 0
+#[test]
+fn check_on_sample_exits_0() {
+    assert_eq!(
+        check(&[], &[&fixture("sample.md")]),
+        (Some(0), String::new())
+    );
+}
+
+/// Given the sample file and a limit of 10 words
+/// When `vernier check` runs
+/// Then exactly its 13-word sentence (line 7, column 1) is flagged and it exits 1
+#[test]
+fn check_flags_the_samples_13_word_sentence_over_a_limit_of_10() {
+    let path = fixture("sample.md");
+    assert_eq!(
+        check(&["--max-sentence-len", "10"], &[&path]),
+        (
+            Some(1),
+            format!(
+                "{}:7:1: LongSentence: sentence has 13 words (max 10)\n",
+                path.display()
+            )
+        )
+    );
+}
+
+/// Given a file with a long sentence and a file that cannot be read
+/// When `vernier check` runs on both
+/// Then the long sentence is still flagged, and the unreadable file wins: exit 2
+#[test]
+fn an_unreadable_file_wins_over_a_flag() {
+    let (code, stdout) = check(&[], &[&fixture("long.md"), &missing()]);
+    assert_eq!(code, Some(2));
+    assert!(stdout.contains("LongSentence"), "{stdout}");
 }

@@ -118,7 +118,7 @@ Expected rejections: building a `Block` or `Sentence` outside its module (privat
 - [x] Case-insensitive abbreviation match → `lowercase_no_does_not_merge` FAIL.
 - [x] `>=` instead of `>` for `LongSentence` → P12 FAIL.
 - [x] Corrupt 60 rows of the TSV (set count 9) → agreement test FAIL (rate < 90 %); revert.
-- [ ] `check` exits 0 on a flagged sentence → `check_flags_a_long_sentence_and_exits_1` FAIL.
+- [x] `check` exits 0 on a flagged sentence → `check_flags_a_long_sentence_and_exits_1` FAIL.
 
 ## Coverage gap (run by hand)
 
@@ -242,5 +242,5 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13)
 | T8 | sentence splitting | `src/sentence.rs`, `src/lib.rs` | spike cases, abbreviation laws, P10, P11 against one-sentence-per-block | UAX #29 + merge + trim | done |
 | T9 | analysis + `LongSentence` | `src/analysis.rs`, `src/lib.rs` | P12, `empty_file_has_absent_metrics` | `analyze` | done |
 | T10 | `analyze` renders metrics | `src/summary.rs`, `src/main.rs`, `tests/cli.rs` | `analyze_prints_surface_metrics` (expectation from the library); M1's test unchanged | `render` lines 2–3 | done |
-| T11 | `check` flags and exits 1 | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/long.md` | `check_flags_a_long_sentence_and_exits_1`, `…max_sentence_len_raises_the_bar`, `check_on_sample_exits_0` | `check` loop | todo |
+| T11 | `check` flags and exits 1 | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/long.md` | `check_flags_a_long_sentence_and_exits_1`, `…max_sentence_len_raises_the_bar`, `check_on_sample_exits_0` | `check` loop | done |
 | T12 | close-out | `spec.md` (ticks, Status `IMPLEMENTED`), `docs/HANDOVER.md`, `README.md`, this plan (ticks) | `just verify`; planted violations seen | — | todo |
