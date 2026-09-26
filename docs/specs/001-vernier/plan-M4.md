@@ -77,6 +77,7 @@ Expected rejections:
 - **P1 stoplist shape:** every committed entry is non-empty, lower-case (`e == e.to_lowercase()`), without whitespace, and unique; comment and blank lines yield no entry.
 - **P2 stoplist wins:** ∀ entry e: ¬`is_nominalization(e)` ∧ ¬`is_nominalization(surface_lemma(plural(e)))`, where `plural` appends `s`, or turns a final `y` into `ies`.
 - **P3 plural invariance:** ∀ L ∈ `[a-z]{3,10}` + suffix: `surface_lemma(L + "s") == L`. If L ends in `ity`: `surface_lemma(L[..len-1] + "ies") == L`.
+- **P3′ possessive invariance (audit 008):** ∀ w ∈ `[a-zA-Z]{1,10}` + {none, `tion`, `ity`, `ies`, `s`}, ∀ p ∈ {`'s`, `’s`, `'`, `’`}: `surface_lemma(w + p) == surface_lemma(w)`.
 - **P4 case invariance:** ∀ word w: `is_nominalization(surface_lemma(w)) == is_nominalization(surface_lemma(w.to_uppercase()))`.
 - **P5 length:** ∀ L with a suffix and fewer than 7 letters: ¬`is_nominalization(L)`. ∀ L with a suffix, ≥ 7 letters and not stoplisted: `is_nominalization(L)`.
 - **P6 monoid:** `NominalizationCount` addition is associative, `Default` is its identity, and `Sum` equals folding with `+`.
@@ -145,6 +146,10 @@ Expected rejections:
   | `class` | `class` |
   | `implementation` | `implementation` |
   | `rations` | `ration` (6 letters, so not a nominalization) |
+  | `decision's` | `decision` (possessive, audit 008) |
+  | `decisions'` | `decision` |
+  | `activity’s` | `activity` |
+  | `decisions’` | `decision` |
 
 - Dedup: synthetic tokens `it(1) has(2,aux) been(3,aux:pass→5) being(4,aux:pass→5) written(5,root)` give `[5]`.
 
@@ -161,7 +166,7 @@ Expected rejections:
 
 | # | Plant | Must fail | Seen |
 | :--- | :--- | :--- | :--- |
-| 1 | `surface_lemma` strips `s` only, with no `ies` → `y` | table row `activities`; P3 (`ity` branch) | [ ] |
+| 1 | `surface_lemma` strips `s` only, with no `ies` → `y` | table row `activities`; P3 (`ity` branch) | [x] |
 | 2 | `is_nominalization` ignores the stoplist | P2 | [ ] |
 | 3 | length measured on the word before lemmatizing | `rations` witness (surface count 1 ≠ 0) | [ ] |
 | 4 | parsed count ignores `upostag` | `NOMZ` parsed 3 (becomes 4) | [ ] |
@@ -171,6 +176,7 @@ Expected rejections:
 | 8 | the passive offset is always the sentence start | `PASSIVE` witness offsets | [ ] |
 | 9 | `analyze` sets `passives: Some(0)` | P11 | [ ] |
 | 10 | `ratio()` returns `Some(0.0)` for zero words | P7; `empty_file_has_no_nominalization_ratio` | [ ] |
+| 12 | the possessive strip ignores `’` (U+2019) | P3′ and the `activity’s` / `decisions’` rows (added with audit 008) | [x] (planted twice: bare `’` only → P3′ + `decisions’`; `’s` and `’` → P3′ + both rows) |
 | 11 | P9 generator never inserts an absent form | plant 7′: drop the "cursor unchanged on a miss" rule. It must fail P9 only while the generator inserts; seen green without insertion, red with it (audit 005) | [ ] |
 
 ## Coverage gap (run by hand)
@@ -238,7 +244,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13;
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | T0 | spec correction, data, plan | `spec.md`, `docs/audits/007-…`, `data/nominalization-stoplist.{txt,PYBIBER-LICENSE}`, this plan | — (docs/data) | criteria corrected; list committed | done |
 | T1 | committed stoplist | `src/nominalization.rs`, `src/lib.rs` | P1 + `contains("city")` against `committed()` returning an empty list | parse `STOPLIST` | done |
-| T2 | surface lemma | `src/nominalization.rs` | table + P3 against identity lower-casing; plant 1 | `surface_lemma` | todo |
+| T2 | surface lemma | `src/nominalization.rs` | table + P3 against identity lower-casing; plant 1 | `surface_lemma` | done |
 | T3 | predicate + counts + monoid | `src/nominalization.rs` | P2, P4, P5, P6, P7, `rations` against `is_nominalization → false` and a zero `ratio`; plants 2, 3, 10 | `is_nominalization`, `surface_nominalizations`, `parsed_nominalizations`, `NominalizationCount` | todo |
 | T4 | passive heads + alignment | `src/passive.rs`, `src/lib.rs`, `src/testing.rs` (`NOMZ_*`, `PASSIVE_*`) | P8, P9, dedup and `PASSIVE` heads against empty outputs; plants 6, 7, 11 | `passive_heads`, `align` | todo |
 | T5 | surface wiring | `src/analysis.rs` | P10 (no parse) and the `NOMZ` surface 4/14 against a zero count; P11's `None` half | `SentenceAnalysis`/`FileAnalysis.nominalizations`, `passives: None`. Existing struct-literal tests get the new fields only | todo |
