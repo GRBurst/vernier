@@ -121,7 +121,7 @@ N = number of non-`PUNCT` tokens.
 
 Each names the concrete input where the mutant differs (audit 005).
 
-- [ ] Skip the cycle walk in `DependencyTree::new` → P2 `Cycle` FAIL (input: `1 a →2, 2 b →1, 3 c root` accepted).
+- [x] Skip the cycle walk in `DependencyTree::new` → P2 `Cycle` FAIL (input: `1 a →2, 2 b →1, 3 c root` accepted).
 - [ ] Reattach only one level (`head = tokens[h].head` once, no loop) → P4 FAIL (input: `1 a →2, 2 , PUNCT →3, 3 ; PUNCT →4, 4 b root`: a's head must be b).
 - [ ] Divide the MDD total by N instead of by the dependencies → `example_sentence_has_mdd_32_over_12` FAIL (32/13) and P7 chain FAIL.
 - [ ] File MDD as the mean of sentence MDDs → `file_mdd_pools_distances_not_means` FAIL (1.5 ≠ 1.75).
@@ -276,7 +276,7 @@ This plan's ticks go in a separate commit when a task would exceed 5 files.
 
 | ID | Scenario | Files | RED (must fail first) | GREEN | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| T1 | well-formed trees accepted, malformed rejected | `src/dependency.rs`, `src/testing.rs`, `src/lib.rs` | P1, P2 against `new` returning `Err(Empty)` / `Ok` always | `Token`, `Parser`, `TreeError`, `DependencyTree::new` | todo |
+| T1 | well-formed trees accepted, malformed rejected | `src/dependency.rs`, `src/testing.rs`, `src/lib.rs` | P1, P2 against `new` returning `Err(Empty)` / `Ok` always | `Token`, `Parser`, `TreeError`, `DependencyTree::new` | done |
 | T2 | content projection | `src/syntax.rs`, `src/lib.rs` | P3, P4 against a projection that keeps `PUNCT` | `content_tree` | todo |
 | T3 | MDD + file MDD | `src/syntax.rs` | example 32/12, `single_word_sentence_has_no_mdd`, P6, P7, P8, `file_mdd_pools_distances_not_means` against `total = 0` | `DependencyDistance`, `dependency_distance` | todo |
 | T4 | depth | `src/syntax.rs` | example 4, P9 against `depth = 0` | `depth` | todo |

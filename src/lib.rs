@@ -6,10 +6,13 @@
 pub mod analysis;
 pub mod block;
 pub mod cli;
+pub mod dependency;
 pub mod position;
 pub mod prose;
 pub mod readability;
 pub mod sentence;
 pub mod summary;
 pub mod syllables;
+#[cfg(test)]
+mod testing;
 pub mod words;
