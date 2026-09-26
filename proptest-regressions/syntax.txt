@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c3c42ac2c6c444a0b58934806a37319fcb2e66dacae9c2241e3d7e5936cb0d31 # shrinks to tokens = [Token { id: 1, form: "the", lemma: "the", upostag: "NOUN", head: 0, deprel: "root" }, Token { id: 2, form: "%", lemma: "%", upostag: "DET", head: 1, deprel: "ccomp" }, Token { id: 3, form: "caused", lemma: "caused", upostag: "DET", head: 2, deprel: "det" }, Token { id: 4, form: "which", lemma: "which", upostag: "PUNCT", head: 3, deprel: "advmod" }, Token { id: 5, form: "the", lemma: "the", upostag: "NUM", head: 3, deprel: "advcl" }, Token { id: 6, form: ",", lemma: ",", upostag: "PUNCT", head: 1, deprel: "xcomp" }, Token { id: 7, form: ",", lemma: ",", upostag: "PRON", head: 6, deprel: "acl" }]
+cc 92befe86162fae20c7980cf2ce7e15f432aa51e33f613f4c46592965024cd07f # shrinks to tokens = [Token { id: 1, form: "the", lemma: "the", upostag: "NOUN", head: 2, deprel: "nsubj" }, Token { id: 2, form: "the", lemma: "the", upostag: "PUNCT", head: 0, deprel: "root" }]

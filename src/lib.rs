@@ -13,6 +13,7 @@ pub mod readability;
 pub mod sentence;
 pub mod summary;
 pub mod syllables;
+pub mod syntax;
 #[cfg(test)]
 mod testing;
 pub mod words;
