@@ -1,7 +1,54 @@
 //! Syntactic metrics (spec 001 M3a): pure functions over a validated dependency tree, computed on
 //! its content tokens only.
 
+use std::iter::Sum;
+use std::ops::Add;
+
 use crate::dependency::{DependencyTree, Token};
+
+/// The summed distances |i − head(i)| between content tokens and their content heads, and how many
+/// such dependencies there are; they add up across sentences, so a file's MDD pools its sentences'
+/// distances instead of averaging their means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DependencyDistance {
+    pub total: usize,
+    pub dependencies: usize,
+}
+
+impl DependencyDistance {
+    /// The mean dependency distance, absent when there is no dependency to divide by.
+    pub fn mean(self) -> Option<f64> {
+        (self.dependencies > 0).then(|| self.total as f64 / self.dependencies as f64)
+    }
+}
+
+impl Add for DependencyDistance {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            total: self.total + other.total,
+            dependencies: self.dependencies + other.dependencies,
+        }
+    }
+}
+
+impl Sum for DependencyDistance {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), Add::add)
+    }
+}
+
+/// The distance between every content token and its content head, over the content projection.
+pub fn dependency_distance(tree: &DependencyTree) -> DependencyDistance {
+    content_tree(tree)
+        .dependencies()
+        .map(|(dependent, head)| DependencyDistance {
+            total: dependent.abs_diff(head),
+            dependencies: 1,
+        })
+        .sum()
+}
 
 /// A content token of the projection, with its head renumbered among content tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,8 +66,17 @@ struct ContentTree<'t> {
     tokens: Vec<ContentToken<'t>>,
 }
 
-// why: the metrics that read the projection land in the next tasks of plan-M3a (T3–T6).
-#[allow(dead_code)]
+impl ContentTree<'_> {
+    /// Every (content id, content head) pair whose head is not the root.
+    fn dependencies(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.head != 0)
+            .map(|(k, c)| (k + 1, c.head))
+    }
+}
+
 fn content_tree(tree: &DependencyTree) -> ContentTree<'_> {
     let tokens = tree.tokens();
     let content_ids = content_ids(tokens);
@@ -65,11 +121,87 @@ fn nearest_content_ancestor(tokens: &[Token], head: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{tokens_from_conllu, well_formed_tree};
+    use crate::testing::{EXAMPLE_CONLLU, tokens_from_conllu, well_formed_tree};
     use proptest::prelude::*;
 
     fn tree(tokens: Vec<Token>) -> DependencyTree {
         DependencyTree::new(tokens).expect("a well-formed tree")
+    }
+
+    fn word(id: usize, head: usize) -> Token {
+        Token {
+            id,
+            form: format!("w{id}"),
+            lemma: format!("w{id}"),
+            upostag: "X".to_owned(),
+            head,
+            deprel: if head == 0 { "root" } else { "dep" }.to_owned(),
+        }
+    }
+
+    /// n words, each headed by the next; the last is the root.
+    fn chain(n: usize) -> DependencyTree {
+        tree(
+            (1..=n)
+                .map(|i| word(i, if i == n { 0 } else { i + 1 }))
+                .collect(),
+        )
+    }
+
+    /// n words, all headed by the first, which is the root.
+    fn star(n: usize) -> DependencyTree {
+        tree((1..=n).map(|i| word(i, usize::from(i != 1))).collect())
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    /// Given the UDPipe 2 parse of the M3a example sentence (13 content tokens, 3 `PUNCT`)
+    /// When its dependency distance is measured
+    /// Then the total is 32 over 12 dependencies, an MDD of 32/12
+    #[test]
+    fn example_sentence_has_mdd_32_over_12() {
+        let distance = dependency_distance(&tree(tokens_from_conllu(EXAMPLE_CONLLU)));
+        assert_eq!(
+            distance,
+            DependencyDistance {
+                total: 32,
+                dependencies: 12
+            }
+        );
+        assert_eq!(distance.mean(), Some(32.0 / 12.0));
+    }
+
+    /// Given a one-word sentence `1 Go root`, and the same with a `PUNCT` token `2 ! →1`
+    /// When its dependency distance is measured
+    /// Then the MDD is absent
+    #[test]
+    fn single_word_sentence_has_no_mdd() {
+        let bare = "1 Go go VERB _ _ 0 root";
+        let punctuated = "1 Go go VERB _ _ 0 root\n2 ! ! PUNCT _ _ 1 punct";
+        for conllu in [bare, punctuated] {
+            let distance = dependency_distance(&tree(tokens_from_conllu(conllu)));
+            assert_eq!(distance.mean(), None, "{conllu:?}");
+        }
+    }
+
+    /// Given a chain of 2 words (MDD 1) and a star of 4 words (MDD 2)
+    /// When the file MDD is taken over both sentences
+    /// Then it is the pooled 7/4, not the mean of the sentence MDDs 1.5
+    #[test]
+    fn file_mdd_pools_distances_not_means() {
+        let file: DependencyDistance = [chain(2), star(4)].iter().map(dependency_distance).sum();
+        assert_eq!(file.mean(), Some(7.0 / 4.0), "{file:?}");
+    }
+
+    fn distance_counts() -> impl Strategy<Value = DependencyDistance> {
+        (prop_oneof![1 => Just(0usize), 3 => 1usize..100], 0usize..10).prop_map(
+            |(dependencies, extra)| DependencyDistance {
+                total: dependencies + dependencies * extra,
+                dependencies,
+            },
+        )
     }
 
     /// The original id of the first non-`PUNCT` token on `id`'s head chain, walked one step at a
@@ -137,6 +269,57 @@ mod tests {
                 let expected = renumbered(naive_content_ancestor(&tokens, c.token.id));
                 prop_assert_eq!(c.head, expected, "token {}", c.token.id);
             }
+        }
+
+        /// Given any well-formed tree with N content tokens
+        /// When its dependency distance is measured
+        /// Then the MDD is absent exactly when there is no dependency, and always when N < 2;
+        /// otherwise it is at least 1; with one projected root there are N − 1 dependencies
+        #[test]
+        fn mdd_is_absent_below_two_content_tokens_and_at_least_one(tokens in well_formed_tree()) {
+            let t = tree(tokens);
+            let projection = content_tree(&t);
+            let n = projection.tokens.len();
+            let roots = projection.tokens.iter().filter(|c| c.head == 0).count();
+            let distance = dependency_distance(&t);
+            prop_assert_eq!(distance.mean().is_none(), distance.dependencies == 0);
+            if n < 2 {
+                prop_assert_eq!(distance.mean(), None);
+            }
+            if let Some(mdd) = distance.mean() {
+                prop_assert!(mdd >= 1.0, "{}", mdd);
+            }
+            if roots == 1 {
+                prop_assert_eq!(distance.dependencies, n - 1);
+            }
+        }
+
+        /// Given a chain of n ≥ 2 words and a star of n ≥ 2 words rooted at the first
+        /// When their MDD is measured
+        /// Then the chain's is 1 and the star's is n / 2
+        #[test]
+        fn chain_mdd_is_one_and_star_mdd_is_half_its_length(n in 2usize..40) {
+            let chain_mdd = dependency_distance(&chain(n)).mean().expect("n ≥ 2");
+            let star_mdd = dependency_distance(&star(n)).mean().expect("n ≥ 2");
+            prop_assert!(close(chain_mdd, 1.0), "{}", chain_mdd);
+            prop_assert!(close(star_mdd, n as f64 / 2.0), "{}", star_mdd);
+        }
+
+        /// Given any three dependency distances
+        /// When they are added
+        /// Then addition is associative and commutative, zero is neutral, and the MDD of a sum is
+        /// the pooled total over the pooled dependencies
+        #[test]
+        fn dependency_distances_form_a_commutative_monoid(
+            a in distance_counts(), b in distance_counts(), c in distance_counts()
+        ) {
+            prop_assert_eq!((a + b) + c, a + (b + c));
+            prop_assert_eq!(a + b, b + a);
+            prop_assert_eq!(a + DependencyDistance::default(), a);
+            prop_assert_eq!([a, b, c].into_iter().sum::<DependencyDistance>(), a + b + c);
+            let pooled = (a.dependencies + b.dependencies > 0)
+                .then(|| (a.total + b.total) as f64 / (a.dependencies + b.dependencies) as f64);
+            prop_assert_eq!((a + b).mean(), pooled);
         }
     }
 }

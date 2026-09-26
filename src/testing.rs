@@ -28,6 +28,31 @@ pub(crate) fn tokens_from_conllu(conllu: &str) -> Vec<Token> {
         .collect()
 }
 
+/// The spec's M3a example sentence parsed by UDPipe 2 (LINDAT REST service, model
+/// `english-ewt-ud-2.17-251125`, fetched 2026-09-27); used as test data only.
+pub(crate) const EXAMPLE_CONLLU: &str = "\
+# generator = UDPipe 2, https://lindat.mff.cuni.cz/services/udpipe (fetched 2026-09-27)
+# udpipe_model = english-ewt-ud-2.17-251125
+# udpipe_model_licence = CC BY-NC-SA
+# text = The proposal, which the executive committee rejected after extensive deliberation, caused significant delays.
+1	The	the	DET	DT	Definite=Def|PronType=Art	2	det	_	_
+2	proposal	proposal	NOUN	NN	Number=Sing	13	nsubj	_	SpaceAfter=No
+3	,	,	PUNCT	,	_	8	punct	_	_
+4	which	which	PRON	WDT	PronType=Rel	8	obj	_	_
+5	the	the	DET	DT	Definite=Def|PronType=Art	7	det	_	_
+6	executive	executive	ADJ	JJ	Degree=Pos	7	amod	_	_
+7	committee	committee	NOUN	NN	Number=Sing	8	nsubj	_	_
+8	rejected	reject	VERB	VBD	Mood=Ind|Number=Sing|Person=3|Tense=Past|VerbForm=Fin	2	acl:relcl	_	_
+9	after	after	ADP	IN	_	11	case	_	_
+10	extensive	extensive	ADJ	JJ	Degree=Pos	11	amod	_	_
+11	deliberation	deliberation	NOUN	NN	Number=Sing	8	obl	_	SpaceAfter=No
+12	,	,	PUNCT	,	_	2	punct	_	_
+13	caused	cause	VERB	VBD	Mood=Ind|Number=Sing|Person=3|Tense=Past|VerbForm=Fin	0	root	_	_
+14	significant	significant	ADJ	JJ	Degree=Pos	15	amod	_	_
+15	delays	delay	NOUN	NNS	Number=Plur	13	obj	_	SpaceAfter=No
+16	.	.	PUNCT	.	_	13	punct	_	SpaceAfter=No
+";
+
 const DEPRELS: [&str; 13] = [
     "nsubj",
     "nsubj:pass",
