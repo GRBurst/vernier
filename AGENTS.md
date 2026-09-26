@@ -9,6 +9,7 @@ This file is always loaded; every line must pass the test *would removing it cau
 2. `docs/PROCESS.md` — the increment loop, tiers, gates. Binding.
 3. `docs/HANDOVER.md` — where the last session stopped; a bare "continue" means: resume from its "Next action" (D7).
 4. The spec `docs/HANDOVER.md` names as in flight, with its `PROPOSED` deltas in `history/`; `docs/BACKLOG.md` for what's next.
+5. Before writing code: `docs/ENGINEERING.md` — how code is written (test first, types, errors, banned constructs). Binding (D10).
 
 ## Hard rules
 
@@ -22,6 +23,9 @@ This file is always loaded; every line must pass the test *would removing it cau
 - End every session with an updated `docs/HANDOVER.md` and a clean commit (A5).
 - `.sdd/` is untracked scratch; anything the user asks to persist goes into a committed file (B5).
 - Tests state laws and properties, not just constants (A4). Cognitive complexity ≤ 10 per function; no `unsafe` without an ADR (D9).
+- Test first, pure core, typed outcomes; no `unwrap`/`expect`/`panic!` outside tests — an `#[allow]` carries a `// why:` (D10).
+- Every corrected mistake gets a committed `docs/audits/<NNN>-<slug>.md` before the fix counts as done (D11).
+- Never create or modify global cargo, rustup or user configs; everything runs through devenv (B4).
 
 ## Commands
 

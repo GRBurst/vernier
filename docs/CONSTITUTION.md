@@ -97,3 +97,12 @@ Adapted on 2026-09-26 from the constitution of the SDD framework repository, tri
 - **D9 — Elegance gate.**
   Cognitive complexity per function ≤ 10 (`clippy.toml`, denied in `Cargo.toml`); `unsafe` is forbidden unless an ADR permits it for a named module.
   *Why:* complex functions are where agents hide defects and reviewers stop reading.
+<a id="D10"></a>
+- **D10 — Engineering guide.**
+  `docs/ENGINEERING.md` is binding for all code: test first, a pure core with I/O in the shell, domain newtypes, outcomes explicit in the type, no `unwrap`/`expect`/`panic!` outside tests. Every rule a lint can check is denied in `Cargo.toml`; a local `#[allow]` carries a `// why:` comment.
+  *Why:* agents default to the shortest code that compiles; stated rules plus lints make the well-typed path the easy one.
+<a id="D11"></a>
+- **D11 — Audits.**
+  Every corrected mistake gets `docs/audits/<NNN>-<slug>.md` (three-digit ordinal, never reused; Symptom, Root cause, Rule) committed before the fix counts as done. Audits are append-only; a rule no longer valid is marked `SUPERSEDED by <NNN>`.
+  *Why:* a mistake fixed without a written rule is made again by the next context.
+  Added 2026-09-26; extends D1's artifact locations.
