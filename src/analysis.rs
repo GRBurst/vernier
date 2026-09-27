@@ -136,6 +136,19 @@ struct Parsed {
     nominalizations: usize,
 }
 
+/// The summed surface nominalizations and words of every sentence of `source`, read as `format`;
+/// the same count `analyze` gives the file.
+pub fn file_nominalizations(source: &str, format: SourceFormat) -> NominalizationCount {
+    let stoplist = Stoplist::committed();
+    let Ok(counts) = each_sentence::<_, Infallible>(source, format, |s| {
+        Ok(NominalizationCount {
+            nominalizations: surface_nominalizations(words(s.text()), &stoplist),
+            words: sentence_counts(s).words,
+        })
+    });
+    counts.into_iter().sum()
+}
+
 /// The analysis of `source`, with `parse` giving each sentence's parse (or `None` when there is
 /// no parser); the file's dependency distance and passives are left `None` for the caller to fill.
 fn analyze_with<E>(

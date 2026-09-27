@@ -53,19 +53,19 @@ fn analyze_prints_surface_metrics() {
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 6, "{stdout}");
+    assert_eq!(lines.len(), 8, "{stdout}");
     for (i, path) in [&md, &txt].into_iter().enumerate() {
         let summary = library_summary(path);
         let (c, r) = (summary.counts, summary.readability.unwrap());
         assert_eq!(
-            lines[3 * i + 1],
+            lines[4 * i + 1],
             format!(
                 "  {} sentences, {} syllables, {} complex words",
                 c.sentences, c.syllables, c.complex_words
             )
         );
         assert_eq!(
-            lines[3 * i + 2],
+            lines[4 * i + 2],
             format!(
                 "  Flesch Reading Ease {:.2}, Flesch-Kincaid Grade {:.2}, Gunning Fog {:.2}, average sentence length {:.2}",
                 r.flesch_reading_ease,
@@ -78,7 +78,24 @@ fn analyze_prints_surface_metrics() {
     // Witnesses: sample.md holds 4 sentences (paragraph, two tight items, blockquote); plain.txt
     // holds 2 hard-wrapped sentences of 9 syllables and no complex word.
     assert!(lines[1].starts_with("  4 sentences, "), "{stdout}");
-    assert_eq!(lines[4], "  2 sentences, 9 syllables, 0 complex words");
+    assert_eq!(lines[5], "  2 sentences, 9 syllables, 0 complex words");
+}
+
+/// Given a Markdown file holding the NOMZ sentence (4 nominalizations of 14 words)
+/// When `vernier analyze` runs on it
+/// Then its fourth line gives the nominalization ratio as the library renders it, `4 of 14`
+/// words, and passive voice absent (no parse)
+#[test]
+fn analyze_prints_the_nominalization_ratio() {
+    let path = fixture("nominal.md");
+    let out = vernier(&["analyze"], &[&path]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let expected = expected_line(&path);
+    assert_eq!(stdout.lines().nth(3), expected.lines().nth(3), "{stdout}");
+    let line = stdout.lines().nth(3).unwrap_or_default();
+    assert!(line.contains("(4 of 14 words)"), "{line}");
+    assert!(line.ends_with("passive voice absent (no parse)"), "{line}");
 }
 
 /// Given a readable Markdown file and a readable plain-text file

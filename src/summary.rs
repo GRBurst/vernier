@@ -1,10 +1,11 @@
-//! The per-file summary `vernier analyze` prints: prose spans and words (M1), then the surface
-//! counts and scores (M2).
+//! The per-file summary `vernier analyze` prints: prose spans and words (M1), the surface counts
+//! and scores (M2), then the nominalization ratio and passive voice (M4).
 
 use std::path::Path;
 
-use crate::analysis::surface_counts;
+use crate::analysis::{file_nominalizations, surface_counts};
 use crate::block::Block;
+use crate::nominalization::NominalizationCount;
 use crate::prose::{SourceFormat, blocks, prose};
 use crate::readability::{Readability, SurfaceCounts, readability};
 use crate::words::count_words;
@@ -16,6 +17,7 @@ pub struct FileSummary {
     pub words: usize,
     pub counts: SurfaceCounts,
     pub readability: Option<Readability>,
+    pub nominalizations: NominalizationCount,
 }
 
 /// Counts the prose spans of `source` and the words of its block prose (so inline markup inside a
@@ -30,15 +32,17 @@ pub fn summarize(source: &str, format: SourceFormat) -> FileSummary {
             .sum(),
         counts,
         readability: readability(counts),
+        nominalizations: file_nominalizations(source, format),
     }
 }
 
-/// The summary of one file: M1's line (`notes.md: 3 prose spans, 42 words`), then two indented
-/// lines with the surface counts and the scores (or their absence).
+/// The summary of one file: M1's line (`notes.md: 3 prose spans, 42 words`), then three indented
+/// lines with the surface counts, the scores (or their absence), and the nominalization ratio
+/// (or its absence) with passive voice, which is absent without a parse.
 pub fn render(path: &Path, summary: &FileSummary) -> String {
     let c = summary.counts;
     format!(
-        "{}: {} prose spans, {} words\n  {} sentences, {} syllables, {} complex words\n  {}",
+        "{}: {} prose spans, {} words\n  {} sentences, {} syllables, {} complex words\n  {}\n  {}, passive voice absent (no parse)",
         path.display(),
         summary.spans,
         summary.words,
@@ -47,7 +51,20 @@ pub fn render(path: &Path, summary: &FileSummary) -> String {
         c.complex_words,
         summary
             .readability
-            .map_or_else(|| "metrics absent (no sentences)".to_owned(), render_scores)
+            .map_or_else(|| "metrics absent (no sentences)".to_owned(), render_scores),
+        render_nominalizations(summary.nominalizations)
+    )
+}
+
+fn render_nominalizations(n: NominalizationCount) -> String {
+    n.ratio().map_or_else(
+        || "nominalization ratio absent (no words)".to_owned(),
+        |ratio| {
+            format!(
+                "nominalization ratio {ratio:.3} ({} of {} words)",
+                n.nominalizations, n.words
+            )
+        },
     )
 }
 
@@ -62,6 +79,20 @@ fn render_scores(r: Readability) -> String {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    fn nominal_paragraphs() -> impl Strategy<Value = String> {
+        let word = prop::sample::select(vec![
+            "the",
+            "**decisions**",
+            "implementation's",
+            "cities",
+            "rations",
+            "we",
+            "*Movement*.",
+        ]);
+        let para = prop::collection::vec(word, 1..10).prop_map(|w| format!("{}.", w.join(" ")));
+        prop::collection::vec(para, 0..4).prop_map(|p| p.join("\n\n"))
+    }
 
     fn paragraphs() -> impl Strategy<Value = String> {
         let word = prop::sample::select(vec!["alpha", "beta", "café", "x2"]);
@@ -95,6 +126,18 @@ mod tests {
             prop_assert_eq!(summary.counts, surface_counts(&md, SourceFormat::Markdown));
             prop_assert_eq!(summary.counts.words, summary.words);
             prop_assert_eq!(summary.readability, readability(summary.counts));
+        }
+
+        /// Given Markdown paragraphs with nominalizations, markup and possessives
+        /// When the file is summarized
+        /// Then its nominalization count is the file's count from `analyze`, over the file's words
+        #[test]
+        fn nominalizations_are_the_analyzed_files(md in nominal_paragraphs()) {
+            let summary = summarize(&md, SourceFormat::Markdown);
+            let thresholds = crate::analysis::Thresholds { max_sentence_len: 25, max_mdd: 3.0, max_tree_depth: 5, max_clauses: 2 };
+            let file = crate::analysis::analyze(&md, SourceFormat::Markdown, &thresholds);
+            prop_assert_eq!(summary.nominalizations, file.nominalizations);
+            prop_assert_eq!(summary.nominalizations.words, summary.counts.words);
         }
 
         /// Given Markdown paragraphs
@@ -195,6 +238,7 @@ mod tests {
             words: 42,
             counts: SurfaceCounts::default(),
             readability: None,
+            nominalizations: NominalizationCount::default(),
         };
         assert_eq!(
             render(Path::new("notes.md"), &summary).lines().next(),
@@ -218,11 +262,16 @@ mod tests {
             words: 100,
             counts,
             readability: readability(counts),
+            nominalizations: NominalizationCount {
+                nominalizations: 5,
+                words: 100,
+            },
         };
         assert_eq!(
             render(Path::new("notes.md"), &summary),
             "notes.md: 4 prose spans, 100 words\n  4 sentences, 150 syllables, 10 complex words\n  \
-             Flesch Reading Ease 54.56, Flesch-Kincaid Grade 11.86, Gunning Fog 14.00, average sentence length 25.00"
+             Flesch Reading Ease 54.56, Flesch-Kincaid Grade 11.86, Gunning Fog 14.00, average sentence length 25.00\n  \
+             nominalization ratio 0.050 (5 of 100 words), passive voice absent (no parse)"
         );
     }
 
@@ -234,7 +283,36 @@ mod tests {
         let summary = summarize("# Only a heading\n", SourceFormat::Markdown);
         assert_eq!(
             render(Path::new("h.md"), &summary),
-            "h.md: 0 prose spans, 0 words\n  0 sentences, 0 syllables, 0 complex words\n  metrics absent (no sentences)"
+            "h.md: 0 prose spans, 0 words\n  0 sentences, 0 syllables, 0 complex words\n  metrics absent (no sentences)\n  \
+             nominalization ratio absent (no words), passive voice absent (no parse)"
+        );
+    }
+
+    /// Given an empty file and a file of only a heading
+    /// When it is summarized and rendered
+    /// Then it has no nominalization ratio, and the fourth line says so
+    #[test]
+    fn empty_file_has_no_nominalization_ratio() {
+        for source in ["", "# Only a heading\n"] {
+            let summary = summarize(source, SourceFormat::Markdown);
+            assert_eq!(summary.nominalizations.ratio(), None, "{source:?}");
+            assert_eq!(
+                render(Path::new("e.md"), &summary).lines().nth(3),
+                Some("  nominalization ratio absent (no words), passive voice absent (no parse)"),
+                "{source:?}"
+            );
+        }
+    }
+
+    /// Given the NOMZ sentence
+    /// When it is summarized and rendered
+    /// Then the fourth line gives the ratio 4/14 to 3 decimals and its counts
+    #[test]
+    fn renders_the_nominalization_ratio() {
+        let summary = summarize(crate::testing::NOMZ_TEXT, SourceFormat::Markdown);
+        assert_eq!(
+            render(Path::new("n.md"), &summary).lines().nth(3),
+            Some("  nominalization ratio 0.286 (4 of 14 words), passive voice absent (no parse)")
         );
     }
 }
