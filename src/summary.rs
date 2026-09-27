@@ -1,5 +1,6 @@
-//! The per-file summary `vernier analyze` prints: prose spans and words (M1), the surface counts
-//! and scores (M2), then the nominalization ratio and passive voice (M4).
+//! The per-file summary `vernier analyze` prints: prose spans and words (M1), then a table of the
+//! file's metrics (M5): surface counts and scores (M2), mean dependency distance (M3), the
+//! nominalization ratio and passive voice (M4).
 
 use std::path::Path;
 
@@ -18,7 +19,25 @@ pub struct FileSummary {
     pub counts: SurfaceCounts,
     pub readability: Option<Readability>,
     pub nominalizations: NominalizationCount,
+    /// The file's mean dependency distance; `None` when nothing was parsed.
+    pub mean_dependency_distance: Option<f64>,
+    /// The file's passive constructions; `None` when nothing was parsed.
+    pub passives: Option<usize>,
 }
+
+/// The rows of `analyze`'s table, in order.
+pub const METRICS: [&str; 10] = [
+    "sentences",
+    "syllables",
+    "complex words",
+    "Flesch Reading Ease",
+    "Flesch-Kincaid Grade",
+    "Gunning Fog",
+    "average sentence length",
+    "mean dependency distance",
+    "nominalization ratio",
+    "passive voice",
+];
 
 /// Counts the prose spans of `source` and the words of its block prose (so inline markup inside a
 /// word splits no word), and scores its sentences.
@@ -33,45 +52,71 @@ pub fn summarize(source: &str, format: SourceFormat) -> FileSummary {
         counts,
         readability: readability(counts),
         nominalizations: file_nominalizations(source, format),
+        mean_dependency_distance: None,
+        passives: None,
     }
 }
 
-/// The summary of one file: M1's line (`notes.md: 3 prose spans, 42 words`), then three indented
-/// lines with the surface counts, the scores (or their absence), and the nominalization ratio
-/// (or its absence) with passive voice, which is absent without a parse.
+/// The summary of one file: M1's line (`notes.md: 3 prose spans, 42 words`), then a table with a
+/// `metric`/`value` header and one row per metric, in the order of `METRICS`, where an absent
+/// metric reads `absent (…)`.
 pub fn render(path: &Path, summary: &FileSummary) -> String {
-    let c = summary.counts;
-    format!(
-        "{}: {} prose spans, {} words\n  {} sentences, {} syllables, {} complex words\n  {}\n  {}, passive voice absent (no parse)",
+    let head = format!(
+        "{}: {} prose spans, {} words",
         path.display(),
         summary.spans,
-        summary.words,
-        c.sentences,
-        c.syllables,
-        c.complex_words,
+        summary.words
+    );
+    let header = table_row("metric", "value");
+    let rows = METRICS
+        .iter()
+        .zip(values(summary))
+        .map(|(name, value)| table_row(name, &value));
+    std::iter::once(head)
+        .chain(std::iter::once(header))
+        .chain(rows)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The width of the table's name column: the longest metric name.
+const NAME_WIDTH: usize = "mean dependency distance".len();
+
+fn table_row(name: &str, value: &str) -> String {
+    format!("  {name:<NAME_WIDTH$}  {value}")
+}
+
+/// Each metric's value, in the order of `METRICS`.
+fn values(summary: &FileSummary) -> [String; METRICS.len()] {
+    let c = summary.counts;
+    let score = |pick: fn(&Readability) -> f64| {
+        summary.readability.as_ref().map_or_else(
+            || "absent (no sentences)".to_owned(),
+            |r| format!("{:.2}", pick(r)),
+        )
+    };
+    [
+        c.sentences.to_string(),
+        c.syllables.to_string(),
+        c.complex_words.to_string(),
+        score(|r| r.flesch_reading_ease),
+        score(|r| r.flesch_kincaid_grade),
+        score(|r| r.gunning_fog),
+        score(|r| r.average_sentence_length),
         summary
-            .readability
-            .map_or_else(|| "metrics absent (no sentences)".to_owned(), render_scores),
-        render_nominalizations(summary.nominalizations)
-    )
+            .mean_dependency_distance
+            .map_or_else(|| "absent (no parse)".to_owned(), |mdd| format!("{mdd:.2}")),
+        render_nominalizations(summary.nominalizations),
+        summary
+            .passives
+            .map_or_else(|| "absent (no parse)".to_owned(), |n| n.to_string()),
+    ]
 }
 
 fn render_nominalizations(n: NominalizationCount) -> String {
     n.ratio().map_or_else(
-        || "nominalization ratio absent (no words)".to_owned(),
-        |ratio| {
-            format!(
-                "nominalization ratio {ratio:.3} ({} of {} words)",
-                n.nominalizations, n.words
-            )
-        },
-    )
-}
-
-fn render_scores(r: Readability) -> String {
-    format!(
-        "Flesch Reading Ease {:.2}, Flesch-Kincaid Grade {:.2}, Gunning Fog {:.2}, average sentence length {:.2}",
-        r.flesch_reading_ease, r.flesch_kincaid_grade, r.gunning_fog, r.average_sentence_length
+        || "absent (no words)".to_owned(),
+        |ratio| format!("{ratio:.3} ({} of {} words)", n.nominalizations, n.words),
     )
 }
 
@@ -239,6 +284,8 @@ mod tests {
             counts: SurfaceCounts::default(),
             readability: None,
             nominalizations: NominalizationCount::default(),
+            mean_dependency_distance: None,
+            passives: None,
         };
         assert_eq!(
             render(Path::new("notes.md"), &summary).lines().next(),
@@ -246,9 +293,18 @@ mod tests {
         );
     }
 
+    /// The value in the table row of `name`, if the row is there.
+    fn row<'a>(rendered: &'a str, name: &str) -> Option<&'a str> {
+        rendered.lines().skip(1).find_map(|line| {
+            let rest = line.trim_start().strip_prefix(name)?;
+            rest.starts_with("  ").then(|| rest.trim())
+        })
+    }
+
     /// Given a summary of 100 words, 4 sentences, 150 syllables and 10 complex words
     /// When it is rendered
-    /// Then the second line gives the counts and the third the four scores to 2 decimals
+    /// Then a table follows M1's line: a `metric`/`value` header, then one row per metric with
+    /// the counts, the four scores to 2 decimals, and the absent syntactic metrics
     #[test]
     fn renders_counts_and_scores() {
         let counts = SurfaceCounts {
@@ -266,39 +322,78 @@ mod tests {
                 nominalizations: 5,
                 words: 100,
             },
+            mean_dependency_distance: None,
+            passives: None,
         };
         assert_eq!(
             render(Path::new("notes.md"), &summary),
-            "notes.md: 4 prose spans, 100 words\n  4 sentences, 150 syllables, 10 complex words\n  \
-             Flesch Reading Ease 54.56, Flesch-Kincaid Grade 11.86, Gunning Fog 14.00, average sentence length 25.00\n  \
-             nominalization ratio 0.050 (5 of 100 words), passive voice absent (no parse)"
+            "notes.md: 4 prose spans, 100 words\n\
+             \x20 metric                    value\n\
+             \x20 sentences                 4\n\
+             \x20 syllables                 150\n\
+             \x20 complex words             10\n\
+             \x20 Flesch Reading Ease       54.56\n\
+             \x20 Flesch-Kincaid Grade      11.86\n\
+             \x20 Gunning Fog               14.00\n\
+             \x20 average sentence length   25.00\n\
+             \x20 mean dependency distance  absent (no parse)\n\
+             \x20 nominalization ratio      0.050 (5 of 100 words)\n\
+             \x20 passive voice             absent (no parse)"
         );
     }
 
     /// Given a file without sentences
     /// When its summary is rendered
-    /// Then the third line says the metrics are absent
+    /// Then the counts are 0 and each score row says the scores are absent
     #[test]
     fn renders_absent_metrics() {
-        let summary = summarize("# Only a heading\n", SourceFormat::Markdown);
+        let rendered = render(
+            Path::new("h.md"),
+            &summarize("# Only a heading\n", SourceFormat::Markdown),
+        );
         assert_eq!(
-            render(Path::new("h.md"), &summary),
-            "h.md: 0 prose spans, 0 words\n  0 sentences, 0 syllables, 0 complex words\n  metrics absent (no sentences)\n  \
-             nominalization ratio absent (no words), passive voice absent (no parse)"
+            rendered.lines().next(),
+            Some("h.md: 0 prose spans, 0 words")
+        );
+        for name in ["sentences", "syllables", "complex words"] {
+            assert_eq!(row(&rendered, name), Some("0"), "{rendered}");
+        }
+        for name in [
+            "Flesch Reading Ease",
+            "Flesch-Kincaid Grade",
+            "Gunning Fog",
+            "average sentence length",
+        ] {
+            assert_eq!(
+                row(&rendered, name),
+                Some("absent (no sentences)"),
+                "{rendered}"
+            );
+        }
+        assert_eq!(
+            row(&rendered, "nominalization ratio"),
+            Some("absent (no words)"),
+            "{rendered}"
+        );
+        assert_eq!(
+            row(&rendered, "passive voice"),
+            Some("absent (no parse)"),
+            "{rendered}"
         );
     }
 
     /// Given an empty file and a file of only a heading
     /// When it is summarized and rendered
-    /// Then it has no nominalization ratio, and the fourth line says so
+    /// Then it has no nominalization ratio, and its row says so
     #[test]
     fn empty_file_has_no_nominalization_ratio() {
         for source in ["", "# Only a heading\n"] {
             let summary = summarize(source, SourceFormat::Markdown);
             assert_eq!(summary.nominalizations.ratio(), None, "{source:?}");
+            let rendered = render(Path::new("e.md"), &summary);
             assert_eq!(
-                render(Path::new("e.md"), &summary).lines().nth(3),
-                Some("  nominalization ratio absent (no words), passive voice absent (no parse)"),
+                row(&rendered, "nominalization ratio"),
+                Some("absent (no words)"),
                 "{source:?}"
             );
         }
@@ -306,13 +401,46 @@ mod tests {
 
     /// Given the NOMZ sentence
     /// When it is summarized and rendered
-    /// Then the fourth line gives the ratio 4/14 to 3 decimals and its counts
+    /// Then the nominalization row gives the ratio 4/14 to 3 decimals and its counts
     #[test]
     fn renders_the_nominalization_ratio() {
         let summary = summarize(crate::testing::NOMZ_TEXT, SourceFormat::Markdown);
+        let rendered = render(Path::new("n.md"), &summary);
         assert_eq!(
-            render(Path::new("n.md"), &summary).lines().nth(3),
-            Some("  nominalization ratio 0.286 (4 of 14 words), passive voice absent (no parse)")
+            row(&rendered, "nominalization ratio"),
+            Some("0.286 (4 of 14 words)")
         );
+    }
+
+    proptest! {
+        /// Given generated paragraphs, with nominalizations and markup
+        /// When their summary is rendered
+        /// Then M1's line is followed by the header and exactly one row per metric, in order,
+        /// each holding the summary's value or its absence
+        #[test]
+        fn the_table_has_one_row_per_metric(md in nominal_paragraphs()) {
+            let summary = summarize(&md, SourceFormat::Markdown);
+            let rendered = render(Path::new("f.md"), &summary);
+            let lines: Vec<&str> = rendered.lines().collect();
+            prop_assert_eq!(lines.len(), 2 + METRICS.len(), "{}", rendered);
+            prop_assert!(lines[1].trim_start().starts_with("metric"));
+            for (line, name) in lines[2..].iter().zip(METRICS) {
+                prop_assert!(line.trim_start().starts_with(name), "{} vs {}", line, name);
+            }
+            let c = summary.counts;
+            for (name, count) in [("sentences", c.sentences), ("syllables", c.syllables), ("complex words", c.complex_words)] {
+                let expected = count.to_string();
+                prop_assert_eq!(row(&rendered, name), Some(expected.as_str()));
+            }
+            let fre = summary.readability.map_or("absent (no sentences)".to_owned(), |r| format!("{:.2}", r.flesch_reading_ease));
+            prop_assert_eq!(row(&rendered, "Flesch Reading Ease"), Some(fre.as_str()));
+            let fog = summary.readability.map_or("absent (no sentences)".to_owned(), |r| format!("{:.2}", r.gunning_fog));
+            prop_assert_eq!(row(&rendered, "Gunning Fog"), Some(fog.as_str()));
+            prop_assert_eq!(row(&rendered, "mean dependency distance"), Some("absent (no parse)"));
+            prop_assert_eq!(row(&rendered, "passive voice"), Some("absent (no parse)"));
+            let n = summary.nominalizations;
+            let ratio = n.ratio().map_or("absent (no words)".to_owned(), |r| format!("{r:.3} ({} of {} words)", n.nominalizations, n.words));
+            prop_assert_eq!(row(&rendered, "nominalization ratio"), Some(ratio.as_str()));
+        }
     }
 }

@@ -42,10 +42,45 @@ fn library_summary(path: &Path) -> FileSummary {
     summarize(&source, SourceFormat::from_path(path))
 }
 
+/// The value in the table row of `name` among `lines`, if the row is there.
+fn row<'a>(lines: &[&'a str], name: &str) -> Option<&'a str> {
+    lines.iter().find_map(|line| {
+        let rest = line.trim_start().strip_prefix(name)?;
+        rest.starts_with("  ").then(|| rest.trim())
+    })
+}
+
+/// Asserts that the table rows of `path` hold the library's counts and scores (2 decimals).
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn assert_rows_follow_the_library(table: &[&str], path: &Path) {
+    let summary = library_summary(path);
+    let (c, r) = (summary.counts, summary.readability.unwrap());
+    for (name, count) in [
+        ("sentences", c.sentences),
+        ("syllables", c.syllables),
+        ("complex words", c.complex_words),
+    ] {
+        assert_eq!(row(table, name), Some(count.to_string().as_str()), "{name}");
+    }
+    for (name, value) in [
+        ("Flesch Reading Ease", r.flesch_reading_ease),
+        ("Flesch-Kincaid Grade", r.flesch_kincaid_grade),
+        ("Gunning Fog", r.gunning_fog),
+        ("average sentence length", r.average_sentence_length),
+    ] {
+        assert_eq!(
+            row(table, name),
+            Some(format!("{value:.2}").as_str()),
+            "{name}"
+        );
+    }
+}
+
 /// Given a readable Markdown file and a readable plain-text file
 /// When `vernier analyze` runs on both
-/// Then each file's summary line is followed by its sentence counts and its four scores to
-/// 2 decimals, as the library computes them, and it exits 0
+/// Then each file's summary line is followed by its table, whose rows give its sentence counts
+/// and its four scores to 2 decimals as the library computes them, and it exits 0
 #[test]
 fn analyze_prints_surface_metrics() {
     let (md, txt) = (fixture("sample.md"), fixture("plain.txt"));
@@ -53,38 +88,29 @@ fn analyze_prints_surface_metrics() {
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 8, "{stdout}");
+    let per_file = 2 + vernier::summary::METRICS.len();
+    assert_eq!(lines.len(), 2 * per_file, "{stdout}");
     for (i, path) in [&md, &txt].into_iter().enumerate() {
-        let summary = library_summary(path);
-        let (c, r) = (summary.counts, summary.readability.unwrap());
-        assert_eq!(
-            lines[4 * i + 1],
-            format!(
-                "  {} sentences, {} syllables, {} complex words",
-                c.sentences, c.syllables, c.complex_words
-            )
-        );
-        assert_eq!(
-            lines[4 * i + 2],
-            format!(
-                "  Flesch Reading Ease {:.2}, Flesch-Kincaid Grade {:.2}, Gunning Fog {:.2}, average sentence length {:.2}",
-                r.flesch_reading_ease,
-                r.flesch_kincaid_grade,
-                r.gunning_fog,
-                r.average_sentence_length
-            )
-        );
+        assert_rows_follow_the_library(&lines[per_file * i..per_file * (i + 1)], path);
     }
     // Witnesses: sample.md holds 4 sentences (paragraph, two tight items, blockquote); plain.txt
     // holds 2 hard-wrapped sentences of 9 syllables and no complex word.
-    assert!(lines[1].starts_with("  4 sentences, "), "{stdout}");
-    assert_eq!(lines[5], "  2 sentences, 9 syllables, 0 complex words");
+    assert_eq!(row(&lines[..per_file], "sentences"), Some("4"), "{stdout}");
+    let plain = &lines[per_file..];
+    assert_eq!(
+        (
+            row(plain, "sentences"),
+            row(plain, "syllables"),
+            row(plain, "complex words")
+        ),
+        (Some("2"), Some("9"), Some("0"))
+    );
 }
 
 /// Given a Markdown file holding the NOMZ sentence (4 nominalizations of 14 words)
 /// When `vernier analyze` runs on it
-/// Then its fourth line gives the nominalization ratio as the library renders it, `4 of 14`
-/// words, and passive voice absent (no parse)
+/// Then its nominalization row gives the ratio as the library renders it, `4 of 14` words, and
+/// its passive voice row says absent (no parse)
 #[test]
 fn analyze_prints_the_nominalization_ratio() {
     let path = fixture("nominal.md");
@@ -92,10 +118,40 @@ fn analyze_prints_the_nominalization_ratio() {
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8(out.stdout).unwrap();
     let expected = expected_line(&path);
-    assert_eq!(stdout.lines().nth(3), expected.lines().nth(3), "{stdout}");
-    let line = stdout.lines().nth(3).unwrap_or_default();
-    assert!(line.contains("(4 of 14 words)"), "{line}");
-    assert!(line.ends_with("passive voice absent (no parse)"), "{line}");
+    let (lines, library): (Vec<&str>, Vec<&str>) =
+        (stdout.lines().collect(), expected.lines().collect());
+    assert_eq!(
+        row(&lines, "nominalization ratio"),
+        row(&library, "nominalization ratio"),
+        "{stdout}"
+    );
+    let ratio = row(&lines, "nominalization ratio").unwrap_or_default();
+    assert!(ratio.contains("(4 of 14 words)"), "{ratio}");
+    assert_eq!(
+        row(&lines, "passive voice"),
+        Some("absent (no parse)"),
+        "{stdout}"
+    );
+}
+
+/// Given the file with a 30-word sentence, which `check` flags
+/// When `vernier analyze` runs on it
+/// Then it prints M1's line and the table with one row per metric, and exits 0
+#[test]
+fn analyze_prints_a_metrics_table_and_exits_0_on_a_flagged_file() {
+    let path = fixture("long.md");
+    let out = vernier(&["analyze"], &[&path]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines[0].starts_with(&format!("{}: ", path.display())),
+        "{stdout}"
+    );
+    assert!(lines[1].trim_start().starts_with("metric"), "{stdout}");
+    for name in vernier::summary::METRICS {
+        assert!(row(&lines, name).is_some(), "{name}: {stdout}");
+    }
 }
 
 /// Given a readable Markdown file and a readable plain-text file
