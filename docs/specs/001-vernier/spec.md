@@ -117,7 +117,7 @@ Compute the dependency metrics as pure functions over a list of tokens, tested o
 - [x] FOR every well-formed tree, THE depth SHALL be at most N − 1 and the MDD at least 1 (property test over generated trees).
 - [x] WHEN MDD exceeds `--max-mdd` (default 3.0), depth exceeds `--max-tree-depth` (default 5), or the clause count exceeds `--max-clauses` (default 2), THE engine SHALL flag the sentence with `HighMdd`, `DeepTree` or `ClauseOverload`; center-embedding SHALL be flagged `CenterEmbedding`.
 
-## M3b — Parser integration and model handling (Status: PLANNED)
+## M3b — Parser integration and model handling (Status: IMPLEMENTED)
 <a id="M3b"></a>
 
 Put a real Universal Dependencies parser behind the `Parser` trait, after a short spike decides which one.
@@ -125,11 +125,11 @@ Put a real Universal Dependencies parser behind the `Parser` trait, after a shor
 **Acceptance Criteria:**
 
 - [x] BEFORE any parser code lands, THE milestone SHALL commit a spike report comparing the `udpipe` route and the ONNX-via-`ort` route on build inside devenv, binary size, per-sentence time on a committed sample, and output on the M3a example sentence; the user chooses the route from that report (chosen 2026-09-27: ONNX via `ort`; see Provenance).
-- [ ] BEFORE model download or loading code lands, THE milestone SHALL record the license of the chosen model in the README and in this spec; the tool SHALL load it only where that license permits the user's intended use (personal, non-commercial), and SHALL never redistribute it. The chosen model, `ghotriw/roberta-base-english-ud-goeswith-onnx` (ONNX export of `KoichiYasuoka/roberta-base-english-ud-goeswith`), is declared MIT, but it is trained on UD English EWT and Atis (CC BY-SA 4.0) and on GUM, ParTUT and LinES (CC BY-NC-SA 4.0), so vernier treats it as non-commercial ([research/licenses.md](research/licenses.md)).
-- [ ] WHEN `--model-path` names a readable model, THE tool SHALL parse each sentence and compute the M3a metrics from the result.
-- [ ] WHEN the parsed M3a example sentence is analyzed, THE tool SHALL report center-embedding with subject "proposal" and verb "caused" (integration test, skipped with a printed reason when no model is present).
-- [ ] WHEN no `--model-path` is given, THE tool SHALL compute the surface metrics, print one notice on stderr that the syntactic metrics were skipped, and judge the exit code on surface rules only.
-- [ ] WHEN `--model-path` names a missing or unusable model, THE tool SHALL name it on stderr and exit 2.
+- [x] BEFORE model download or loading code lands, THE milestone SHALL record the license of the chosen model in the README and in this spec; the tool SHALL load it only where that license permits the user's intended use (personal, non-commercial), and SHALL never redistribute it. The chosen model, `ghotriw/roberta-base-english-ud-goeswith-onnx` (ONNX export of `KoichiYasuoka/roberta-base-english-ud-goeswith`), is declared MIT, but it is trained on UD English EWT and Atis (CC BY-SA 4.0) and on GUM, ParTUT and LinES (CC BY-NC-SA 4.0), so vernier treats it as non-commercial ([research/licenses.md](research/licenses.md)).
+- [x] WHEN `--model-path` names a readable model, THE tool SHALL parse each sentence and compute the M3a metrics from the result.
+- [x] WHEN the parsed M3a example sentence is analyzed, THE tool SHALL report center-embedding with subject "proposal" and verb "caused" (integration test, skipped with a printed reason when no model is present).
+- [x] WHEN no `--model-path` is given, THE tool SHALL compute the surface metrics, print one notice on stderr that the syntactic metrics were skipped, and judge the exit code on surface rules only.
+- [x] WHEN `--model-path` names a missing or unusable model, THE tool SHALL name it on stderr and exit 2.
 
 ## M4 — Nominalization and passive voice (Status: IMPLEMENTED)
 <a id="M4"></a>

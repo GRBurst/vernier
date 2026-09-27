@@ -2,9 +2,9 @@
 
 ## 1. Preconditions verified
 
-- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 194 tests (171 lib unit, 1 bin, 20 cli, 1 positions, 1 examples) after M5.
-- `PROPTEST_CASES=3000 cargo test --all-targets` passed.
-- Every M5 plant in `plan-M5.md` (1–19) was seen red, then reverted.
+- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 231 tests (194 lib unit, 3 bin, 24 cli, 1 examples, 6 onnx, 2 model, 1 positions) after M3b; the 3 model-backed tests print `skipped: VERNIER_TEST_MODEL is not set` without a model.
+- `VERNIER_TEST_MODEL=$PWD/.sdd/m3b-spike/models/rbeg-onnx cargo test --release --test model --test onnx` passed (ONNX Runtime 1.27.1 from devenv via `ORT_DYLIB_PATH`).
+- Every M5 plant in `plan-M5.md` (1–19) and every M3b plant in `plan-M3b.md` (1–18) was seen red, then reverted.
 - Every planted violation in `docs/specs/001-vernier/plan-M3a.md` was seen to fail (12/12, with the proptest seeds moved aside), then reverted; so was every F1 plant in `plan-M2.md` (7/7) and every M4 plant in `plan-M4.md` (1–13, plus 7″).
 - Nested `devenv shell -- …` fails in the agent sandbox. Commits are unsigned (D13) and the pre-commit hook runs `just verify`.
 
@@ -53,6 +53,14 @@
   - `tests/positions.rs`: text, compact and JSON give the same line/column, at the sentence's first character. `docs/examples/github-actions.yml` + `tests/examples.rs`.
   - Audit 010: serde_json's default parser does not round-trip floats; tests read with the dev-only `float_roundtrip` feature.
   - Changed tests (layout only, stated in the plan): three exact-line `check` tests run with `--format compact`; analyze/summary tests read table rows; main's per-flag-lines test removed (law kept in `diagnostic::one_diagnostic_per_flagged_sentence_with_all_its_flags`).
+- **M3b IMPLEMENTED** (route chosen by the user: ONNX via `ort`, 3d31b3c; plan `docs/specs/001-vernier/plan-M3b.md`, commits 88e806e..3d4f852; ADR `docs/adr/0001-onnx-runtime-via-ort.md` **Proposed**):
+  - `src/mst.rs` Chu-Liu/Edmonds; `src/decoder.rs` labels, masked batch, length rule (n ≤ 509 pieces, read from `config.json`), goeswith, single-root fix plus a strict second pass (ud.py's fix leaves 2 roots in 12,073 of 3.06M multi-root cases), subword merge; `src/onnx.rs` `OnnxParser` (files checked before the runtime loads; `ort::init_from` because ort's implicit load panics; 16-row chunks, output identical to one batch).
+  - Seams: `Parser::parse(&mut self) -> Parse { Tokens, TooLong }`; `Syntax { Unparsed, TooLong, Parsed }`; `AnalysisError::Parse` carries the sentence start. M4 parse lemma `_` falls back to `surface_lemma`.
+  - CLI: `--model-path DIR` fills MDD/passives, syntactic flags and `= metrics:`; without it one stderr notice; missing/unusable model or runtime → named on stderr, exit 2; too-long sentence → one stderr notice, lines read `absent (too long for the model)`.
+  - By hand: sample.md with the model gives the center-embedding proposal/caused/8, MDD 2.67, depth 4, 1 clause, 2.3 s, ~0.7 GB RSS; parity with the spike 0 diffs on 973 tokens; `parser-sample.md` 39–44 s (about 1.4× the spike's summed medians; BACKLOG 6).
+  - Audits 011 (two plants unreachable by the first generators) and 012 (a scratch tick script corrupted plan rows).
+  - Changed tests: `check_accepts_every_m5_flag_and_passes_without_rules` drops `--model-path` (M3b criterion 6 supersedes M1's "flag without effect"); test parsers take `&mut self` and return `Parse::Tokens` (assertions unchanged).
+  - Gotcha (ADR 0001): a failed `init_from` in ort rc.13 still marks the library as loaded; load once per run only.
 - The git history was rebased on 2026-09-27 09:14, outside the agent, and rewritten again during M5. The content is identical (`git range-diff` shows `=`), and the hashes changed. The hashes above are the current ones.
 - A changed M1 test: `check … --max-sentence-len 10` on sample.md now exits 1 (sample.md has a 13-word sentence). The old test passes 30, and a new test asserts the flag at 10.
 
@@ -80,12 +88,15 @@ cargo run -q -- check tests/fixtures/long.md; echo $?
 cargo run -q -- check --format compact tests/fixtures/long.md
 # tests/fixtures/long.md:3:20: CognitiveOverload: LongSentence: sentence has 30 words (max 25)
 cargo run -q -- check --format json tests/fixtures/long.md   # {"schema_version": 1, "files": [...]}
+cargo run -q --release -- check --format compact --model-path .sdd/m3b-spike/models/rbeg-onnx tests/fixtures/sample.md
+# tests/fixtures/sample.md:7:1: CognitiveOverload: CenterEmbedding: subject "proposal" separated from verb "caused" by 8 words
+VERNIER_TEST_MODEL=$PWD/.sdd/m3b-spike/models/rbeg-onnx cargo test --release --test model
 ```
 
 ## Open tasks
 
 - Phase 2 for spec 001 is owed (BACKLOG item 2).
-- User review of M1, M2, M3a, M4 and M5 → `DONE`. By hand:
+- User review of M1, M2, M3a, M3b, M4 and M5 → `DONE`. By hand:
   - M5 colour on a real terminal (`cargo run -- check tests/fixtures/long.md`, then with `NO_COLOR=1`: same text; the sandbox has no PTY);
   - the GitHub Actions example in a real repository (install source has an `OWNER` placeholder);
   - skim the miss list in `measurements/syllables.md`;
@@ -93,11 +104,13 @@ cargo run -q -- check --format json tests/fixtures/long.md   # {"schema_version"
 - M3a decisions to confirm (plan-M3a "Decisions made"): a content token with only `PUNCT` ancestors becomes a projected root; `words_between` counts tokens whose form has a letter or digit; the subject's head is not required to be a `VERB`.
 - M4 candidate stoplist additions (see above); decide on real prose, not by guess.
 - M3b decided by the user 2026-09-27 (3d31b3c): ONNX via `ort` as default; UDPipe backend is BACKLOG 10; LICENSE added by the user (0856e2c).
+- ADR 0001 is Proposed: the user accepts or rejects it.
+- `just spec-check <file>` on a non-spec file (plan, audit) fails its title rule; the hook's default run checks specs only. Expected, not friction.
 
 ## Next action
 
-1. Implement M3b from `docs/specs/001-vernier/plan-M3b.md`, starting at T1 (T0 done: 88e806e, plan + ADR 0001 Proposed + onnxruntime/`ORT_DYLIB_PATH` in `devenv.nix`). The implementing agent stopped at T1 (workspace usage exhausted); nothing of T1 was committed. Model for by-hand and `VERNIER_TEST_MODEL` runs: `.sdd/m3b-spike/models/rbeg-onnx/`; spike code: `.sdd/m3b-spike/onnx/src/main.rs`. The user needs a fresh `devenv shell` for the new `devenv.nix`.
-2. Final questions for the user, still open: ADR 0001 accept?; the performance budget was measured on the udpipe route and ONNX misses it (BACKLOG 6), so which numbers bind ONNX?; the GitHub Actions example's install source (`OWNER` placeholder).
+1. All milestones of spec 001 are IMPLEMENTED. Put the open questions to the user: ADR 0001 accept?; the performance budget (measured on udpipe; ONNX misses it: which numbers bind ONNX, and should the 1.4× gap to the spike be investigated now); the GitHub Actions example's install source (`OWNER` placeholder).
+2. Then phase 2 for spec 001 (BACKLOG 2: Review, Spec-Approval, Comprehension) and the user's by-hand review → `DONE`.
 
 ## Known-bad approaches
 

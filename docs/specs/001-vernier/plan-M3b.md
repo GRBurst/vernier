@@ -269,7 +269,7 @@ Split point if the session runs short: M3b.1 = T0–T5 (pure core, lands green w
 | T7 | CLI wiring | `src/main.rs`, `src/summary.rs`, `tests/cli.rs` | P14; `no_model_prints_one_notice_and_keeps_stdout`, `a_missing_model_is_named_and_exits_2` (text/compact/json), `a_model_without_its_tokenizer_is_named_and_exits_2`, `an_unloadable_runtime_is_named_and_exits_2`; plants 13–17. **Changed test:** `check_accepts_every_m5_flag_and_passes_without_rules` drops `--model-path none.udpipe` (reason in the decisions table) | load once, notices, `with_parse`, exit 2 mapping | done |
 | T8 | model-backed integration tests | `tests/model.rs` | `check_reports_the_examples_center_embedding`, `analyze_json_fills_the_parse_metrics`; T7's wiring precedes them, so their RED is plant 18, seen with the model; without it they print `skipped: …` | — | done |
 | T9 | by-hand checks B1–B4, measured times | this plan (*Measured*) | — | — | done |
-| T10 | close-out (main) | `spec.md` (ticks M3b 2–6, Status), `README.md` (model dir layout, `ORT_DYLIB_PATH`, runtime ≥ 1.17, notices), `docs/HANDOVER.md`, this plan (ticks) | `just verify`; every plant seen red; B1–B4 | — | todo |
+| T10 | close-out (main) | `spec.md` (ticks M3b 2–6, Status), `README.md` (model dir layout, `ORT_DYLIB_PATH`, runtime ≥ 1.17, notices), `docs/HANDOVER.md`, this plan (ticks) | `just verify`; every plant seen red; B1–B4 | — | done |
 
 ## Measured
 
