@@ -1,0 +1,79 @@
+//! End-to-end checks of `vernier` with a real parser (spec 001 M3b criteria 3 and 4). They run
+//! only with `VERNIER_TEST_MODEL` set to a model directory (and ONNX Runtime found through
+//! `ORT_DYLIB_PATH` or the loader); otherwise each prints why it is skipped.
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+/// The model directory of `VERNIER_TEST_MODEL`, or `None` after printing why the test is skipped.
+fn model() -> Option<OsString> {
+    let model = std::env::var_os("VERNIER_TEST_MODEL");
+    if model.is_none() {
+        println!("skipped: VERNIER_TEST_MODEL is not set");
+    }
+    model
+}
+
+/// Runs `vernier` with `--model-path model` on `sample.md`.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn vernier(args: &[&str], model: &OsString) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_vernier"))
+        .args(args)
+        .arg("--model-path")
+        .arg(model)
+        .arg(fixture("sample.md"))
+        .output()
+        .unwrap()
+}
+
+/// Given the spec's example sentence at line 7 of `sample.md`, and the model
+/// When `vernier check --format compact` runs on it
+/// Then it flags the example's center-embedding — subject `proposal` 8 words from verb
+/// `caused` — at `:7:1:` and exits 1 (M3b criterion 4)
+#[test]
+fn check_reports_the_examples_center_embedding() {
+    let Some(model) = model() else { return };
+    let out = vernier(&["check", "--format", "compact"], &model);
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert_eq!(out.status.code(), Some(1), "{stdout}{stderr}");
+    let expected =
+        "CenterEmbedding: subject \"proposal\" separated from verb \"caused\" by 8 words";
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line.contains(":7:1:") && line.contains(expected)),
+        "{stdout}{stderr}"
+    );
+}
+
+/// Given `sample.md` and the model
+/// When `vernier analyze --format json` runs on it
+/// Then the file's mean dependency distance and passive count are numbers, not `null`
+/// (M3b criterion 3)
+#[test]
+fn analyze_json_fills_the_parse_metrics() {
+    let Some(model) = model() else { return };
+    let out = vernier(&["analyze", "--format", "json"], &model);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let document: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_default();
+    let metrics = &document["files"][0]["metrics"];
+    assert!(metrics["mean_dependency_distance"].is_number(), "{stdout}");
+    assert!(metrics["passives"].is_u64(), "{stdout}");
+}

@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 6932fb267aa3b3a44fad1e5cc718a898751ae54a428a38bbc6aa6a1a381d1dfa # shrinks to md = "alpha"
+cc ca894dbf6ec2caf58d52a10606b464dbe6efe059bbcf87f425e9ac708ee46a16 # shrinks to md = "*Movement*.."

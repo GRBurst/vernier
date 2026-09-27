@@ -157,7 +157,7 @@ Each names the input where the mutant differs (audit 005).
 | 15 | `main` exits 0 when the model fails to load (treats it as "no model") | `a_missing_model_is_named_and_exits_2` | [x] |
 | 16 | `main` lets ort load implicitly (no `init_from`) | `an_unloadable_runtime_is_named_and_exits_2` (panic → exit 101 ≠ 2) | [x] |
 | 17 | `onnx` checks `tokenizer.json` after the runtime | `a_model_without_its_tokenizer_is_named_and_exits_2` run with `ORT_DYLIB_PATH` pointing at a missing library (stderr names the runtime, not `tokenizer.json`) | [x] |
-| 18 | the wiring drops the parse (`examine` calls `analyze` even with a parser) | `tests/model.rs` with `VERNIER_TEST_MODEL` set: no `CenterEmbedding` line at `:7:1:` | [ ] |
+| 18 | the wiring drops the parse (`examine` calls `analyze` even with a parser) | `tests/model.rs` with `VERNIER_TEST_MODEL` set: no `CenterEmbedding` line at `:7:1:` | [x] |
 
 Notes from the implementation:
 - #6 fails P8 (checked before P7 so the named check fails first) and `enforces_one_root_where_the_ud_py_fix_leaves_two`.
@@ -267,7 +267,7 @@ Split point if the session runs short: M3b.1 = T0–T5 (pure core, lands green w
 | T5 | decoder | `src/decoder.rs`, `src/lib.rs`, `Cargo.toml` (none if `serde_json` suffices) | P5–P11, label/merge/too-long witnesses against `decode → Err(Empty)`; plants 3–9 | `Labels`, `fits`, `masked_batch`, `decode` | done |
 | T6 | ONNX shell | `Cargo.toml`, `Cargo.lock`, `src/onnx.rs`, `src/lib.rs` | `onnx` unit load errors (missing dir, missing `tokenizer.json`, bad `config.json`) against `load → Err(MissingFile(dir))` for all; with `VERNIER_TEST_MODEL`: `parses_the_example_into_a_tree` | `ort` + `tokenizers`, `OnnxParser` | done |
 | T7 | CLI wiring | `src/main.rs`, `src/summary.rs`, `tests/cli.rs` | P14; `no_model_prints_one_notice_and_keeps_stdout`, `a_missing_model_is_named_and_exits_2` (text/compact/json), `a_model_without_its_tokenizer_is_named_and_exits_2`, `an_unloadable_runtime_is_named_and_exits_2`; plants 13–17. **Changed test:** `check_accepts_every_m5_flag_and_passes_without_rules` drops `--model-path none.udpipe` (reason in the decisions table) | load once, notices, `with_parse`, exit 2 mapping | done |
-| T8 | model-backed integration tests | `tests/model.rs` | `check_reports_the_examples_center_embedding`, `analyze_json_fills_the_parse_metrics`; T7's wiring precedes them, so their RED is plant 18, seen with the model; without it they print `skipped: …` | — | todo |
+| T8 | model-backed integration tests | `tests/model.rs` | `check_reports_the_examples_center_embedding`, `analyze_json_fills_the_parse_metrics`; T7's wiring precedes them, so their RED is plant 18, seen with the model; without it they print `skipped: …` | — | done |
 | T9 | by-hand checks B1–B4, measured times | this plan (*Measured*) | — | — | todo |
 | T10 | close-out (main) | `spec.md` (ticks M3b 2–6, Status), `README.md` (model dir layout, `ORT_DYLIB_PATH`, runtime ≥ 1.17, notices), `docs/HANDOVER.md`, this plan (ticks) | `just verify`; every plant seen red; B1–B4 | — | todo |
 
