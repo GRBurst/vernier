@@ -129,6 +129,13 @@ pub struct ModelLimits {
     pub max_positions: usize,
 }
 
+impl ModelLimits {
+    /// The most subword pieces a sentence may have to be parsed (see `fits`).
+    pub fn max_pieces(&self) -> usize {
+        self.max_positions.saturating_sub(ROW_EXTRA)
+    }
+}
+
 /// The input limits of a model's `config.json`.
 pub fn limits_from_config(json: &str) -> Result<ModelLimits, LabelError> {
     let config: Value = serde_json::from_str(json)?;
@@ -603,11 +610,12 @@ mod tests {
 
     /// Given the model's 512 positions
     /// When the length rule is applied to 509 and to 510 pieces
-    /// Then 509 fits and 510 does not
+    /// Then 509 fits and 510 does not, and 509 is the most pieces the model takes
     #[test]
     fn the_models_limit_is_509_pieces() {
         assert!(fits(509, 512));
         assert!(!fits(510, 512));
+        assert_eq!(ModelLimits { max_positions: 512 }.max_pieces(), 509);
     }
 
     /// Scores of `n` pieces, all `-5` but the given `(head, dep, label)` cells at `10`.
@@ -890,6 +898,8 @@ mod tests {
         ) {
             prop_assert_eq!(fits(pieces, max), pieces > 0 && pieces + 3 <= max);
             prop_assert!(fits(max.saturating_sub(3), max) || max < 4);
+            let most = ModelLimits { max_positions: max }.max_pieces();
+            prop_assert_eq!(fits(pieces, max), pieces > 0 && pieces <= most);
         }
 
         /// Given any finite logits for 1–8 pieces (biased toward goeswith, root labels and two
