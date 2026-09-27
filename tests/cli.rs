@@ -240,8 +240,6 @@ fn check_accepts_every_m5_flag_and_passes_without_rules() {
             "3",
             "--max-clauses",
             "1",
-            "--model-path",
-            "none.udpipe",
         ],
         &[&fixture("sample.md")],
     );
@@ -251,6 +249,160 @@ fn check_accepts_every_m5_flag_and_passes_without_rules() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// The notice `vernier` prints once per run without a model (M3b criterion 5).
+const NO_MODEL: &str = "vernier: no --model-path given; syntactic metrics skipped";
+
+/// Given two readable files and no `--model-path`
+/// When `vernier analyze` and `vernier check --format compact` run on both
+/// Then stderr holds the no-model notice exactly once, stdout is the surface output, and the
+/// exit code is judged on surface rules
+#[test]
+fn no_model_prints_one_notice_and_keeps_stdout() {
+    let (md, long) = (fixture("sample.md"), fixture("long.md"));
+    let out = vernier(&["analyze"], &[&md, &long]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("{}\n{}\n", expected_line(&md), expected_line(&long))
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!("{NO_MODEL}\n")
+    );
+    let out = vernier(&["check", "--format", "compact"], &[&md, &long]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!("{NO_MODEL}\n")
+    );
+}
+
+/// A usable `config.json` for a model directory whose other files are fakes.
+const CONFIG: &str = r#"{
+    "max_position_embeddings": 514,
+    "pad_token_id": 1,
+    "id2label": {"0": "-|_|dep", "1": "NOUN|_|nsubj", "2": "VERB|_|root", "3": "X|_|goeswith"}
+}"#;
+
+/// A usable word-level `tokenizer.json` with `<s>`, `</s>` and `<mask>`.
+const TOKENIZER: &str = r#"{"version": "1.0", "truncation": null, "padding": null,
+    "added_tokens": [], "normalizer": null, "pre_tokenizer": {"type": "Whitespace"},
+    "post_processor": null, "decoder": null,
+    "model": {"type": "WordLevel", "unk_token": "[UNK]",
+              "vocab": {"<s>": 0, "[UNK]": 1, "</s>": 2, "<mask>": 3}}}"#;
+
+/// A fresh model directory named `name` holding `files` (relative path, contents).
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn model_dir(name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("cli-model-{name}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("onnx")).unwrap();
+    for (path, contents) in files {
+        std::fs::write(dir.join(path), contents).unwrap();
+    }
+    dir
+}
+
+/// Runs `vernier` with `ORT_DYLIB_PATH` set to `runtime`.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn vernier_with_runtime(args: &[&str], runtime: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_vernier"))
+        .args(args)
+        .arg(fixture("sample.md"))
+        .env("ORT_DYLIB_PATH", runtime)
+        .output()
+        .unwrap()
+}
+
+/// Asserts that every command in every format, with `--model-path dir` and the runtime
+/// `runtime`, exits 2, prints nothing on stdout and names `named` on stderr.
+fn assert_load_fails(dir: &Path, runtime: &Path, named: &Path) {
+    let dir = dir.display().to_string();
+    for command in ["analyze", "check"] {
+        for format in ["text", "compact", "json"] {
+            let args = [command, "--format", format, "--model-path", &dir];
+            let out = vernier_with_runtime(&args, runtime);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(2), "{command} {format}: {stderr}");
+            assert!(out.stdout.is_empty(), "{command} {format}");
+            let expected = format!("vernier: cannot load the model {dir}: ");
+            assert!(
+                stderr.starts_with(&expected),
+                "{command} {format}: {stderr}"
+            );
+            let named = named.display().to_string();
+            assert!(stderr.contains(&named), "{command} {format}: {stderr}");
+        }
+    }
+}
+
+/// Given `--model-path` naming a directory that does not exist
+/// When `vernier analyze` and `vernier check` run in each format
+/// Then each names the directory on stderr, processes no file and exits 2 (M3b 6, M5 2)
+#[test]
+fn a_missing_model_is_named_and_exits_2() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-model-none");
+    assert_load_fails(&dir, &dir.join("libonnxruntime.so"), &dir);
+}
+
+/// Given a model directory without `tokenizer.json`, and a runtime library that does not exist
+/// When `vernier` runs with it
+/// Then stderr names `tokenizer.json` (the files are checked before the runtime) and it exits 2
+#[test]
+fn a_model_without_its_tokenizer_is_named_and_exits_2() {
+    let dir = model_dir(
+        "no-tokenizer",
+        &[("config.json", CONFIG), ("onnx/model.onnx", "not a model")],
+    );
+    assert_load_fails(
+        &dir,
+        &dir.join("no-such-lib.so"),
+        &dir.join("tokenizer.json"),
+    );
+}
+
+/// A shared library other than ONNX Runtime: one this test process has loaded (Linux), else a
+/// file that is not a library at all.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn other_library(dir: &Path) -> PathBuf {
+    let maps = std::fs::read_to_string("/proc/self/maps").unwrap_or_default();
+    let loaded = maps
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(5))
+        .find(|path| path.contains("/libc.so"));
+    loaded.map_or_else(
+        || {
+            let fake = dir.join("not-a-library.so");
+            std::fs::write(&fake, "not a library").unwrap();
+            fake
+        },
+        PathBuf::from,
+    )
+}
+
+/// Given a model directory with all three files, and `ORT_DYLIB_PATH` naming a library that does
+/// not exist, then one that is not ONNX Runtime
+/// When `vernier` runs with it
+/// Then stderr names the library, it exits 2 and it does not panic
+#[test]
+fn an_unloadable_runtime_is_named_and_exits_2() {
+    let dir = model_dir(
+        "fake",
+        &[
+            ("config.json", CONFIG),
+            ("tokenizer.json", TOKENIZER),
+            ("onnx/model.onnx", "not a model"),
+        ],
+    );
+    let missing = dir.join("no-such-libonnxruntime.so");
+    assert_load_fails(&dir, &missing, &missing);
+    let other = other_library(&dir);
+    assert_load_fails(&dir, &other, &other);
 }
 
 /// Runs `vernier check` and returns its exit code and stdout.

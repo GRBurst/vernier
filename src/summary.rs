@@ -4,11 +4,12 @@
 
 use std::path::Path;
 
-use crate::analysis::{file_nominalizations, surface_counts};
+use crate::analysis::{FileAnalysis, file_nominalizations, surface_counts};
 use crate::block::Block;
 use crate::nominalization::NominalizationCount;
 use crate::prose::{SourceFormat, blocks, prose};
 use crate::readability::{Readability, SurfaceCounts, readability};
+use crate::syntax::DependencyDistance;
 use crate::words::count_words;
 
 /// How much prose one file holds, and how readable it is.
@@ -54,6 +55,18 @@ pub fn summarize(source: &str, format: SourceFormat) -> FileSummary {
         nominalizations: file_nominalizations(source, format),
         mean_dependency_distance: None,
         passives: None,
+    }
+}
+
+/// `summary` with the metrics of one parse of the file: the mean dependency distance, the
+/// passives and the nominalizations (`NOUN` tokens) of `file`, analyzed with a parser. The
+/// sentences are parsed once, for `file`; this adds no parse.
+pub fn with_parse(summary: FileSummary, file: &FileAnalysis) -> FileSummary {
+    FileSummary {
+        mean_dependency_distance: file.dependency_distance.and_then(DependencyDistance::mean),
+        passives: file.passives,
+        nominalizations: file.nominalizations,
+        ..summary
     }
 }
 
@@ -397,6 +410,86 @@ mod tests {
                 "{source:?}"
             );
         }
+    }
+
+    /// Parses the NOMZ sentence into UDPipe's tokens and every other sentence into a chain of
+    /// its words (each headed by the next), tagged `NOUN` with lemma `_`.
+    struct NounParser;
+
+    impl crate::dependency::Parser for NounParser {
+        type Error = std::convert::Infallible;
+
+        fn parse(&mut self, sentence: &str) -> Result<crate::dependency::Parse, Self::Error> {
+            if sentence == crate::testing::NOMZ_TEXT {
+                let tokens = crate::testing::tokens_from_conllu(crate::testing::NOMZ_CONLLU);
+                return Ok(crate::dependency::Parse::Tokens(tokens));
+            }
+            let forms: Vec<&str> = sentence.split_whitespace().collect();
+            let tokens = (1..=forms.len())
+                .map(|id| crate::dependency::Token {
+                    id,
+                    form: forms[id - 1].to_owned(),
+                    lemma: "_".to_owned(),
+                    upostag: "NOUN".to_owned(),
+                    head: if id == forms.len() { 0 } else { id + 1 },
+                    deprel: if id == forms.len() { "root" } else { "dep" }.to_owned(),
+                })
+                .collect();
+            Ok(crate::dependency::Parse::Tokens(tokens))
+        }
+    }
+
+    const THRESHOLDS: crate::analysis::Thresholds = crate::analysis::Thresholds {
+        max_sentence_len: 25,
+        max_mdd: 3.0,
+        max_tree_depth: 5,
+        max_clauses: 2,
+    };
+
+    // why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+    #[allow(clippy::unwrap_used)]
+    fn parsed(source: &str) -> FileAnalysis {
+        crate::analysis::analyze_parsed(
+            source,
+            SourceFormat::Markdown,
+            &THRESHOLDS,
+            &mut NounParser,
+        )
+        .unwrap()
+    }
+
+    proptest! {
+        /// Given paragraphs with nominalizations, markup and possessives, and their analysis
+        /// with a parser
+        /// When the summary takes the parse
+        /// Then it keeps every surface field and takes the parse's mean dependency distance,
+        /// passives and nominalizations (P14)
+        #[test]
+        fn with_parse_takes_the_parse_metrics(md in nominal_paragraphs()) {
+            let surface = summarize(&md, SourceFormat::Markdown);
+            let file = parsed(&md);
+            let summary = with_parse(surface, &file);
+            prop_assert_eq!(summary, FileSummary {
+                mean_dependency_distance: file.dependency_distance.and_then(|d| d.mean()),
+                passives: file.passives,
+                nominalizations: file.nominalizations,
+                ..surface
+            });
+        }
+    }
+
+    /// Given the NOMZ sentence, whose `NOUN` tokens hold 3 nominalizations and whose surface
+    /// words hold 4 (`commission` is a verb there)
+    /// When its summary takes the parse
+    /// Then the summary counts 3, and the parse's distance and passives are present
+    #[test]
+    fn with_parse_counts_the_parsed_nominalizations() {
+        let surface = summarize(crate::testing::NOMZ_TEXT, SourceFormat::Markdown);
+        let summary = with_parse(surface, &parsed(crate::testing::NOMZ_TEXT));
+        assert_eq!(surface.nominalizations.nominalizations, 4);
+        assert_eq!(summary.nominalizations.nominalizations, 3);
+        assert!(summary.mean_dependency_distance.is_some());
+        assert_eq!(summary.passives, Some(0));
     }
 
     /// Given the NOMZ sentence

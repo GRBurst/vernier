@@ -140,23 +140,23 @@ Each names the input where the mutant differs (audit 005).
 
 | # | Plant | Must fail (input) | Seen |
 | :--- | :--- | :--- | :--- |
-| 1 | CLE returns the greedy argmax without contraction | P1 on any matrix with a greedy cycle (the cycle witness `[1, 0, 2]` is not a forest) || [x] |
-| 2 | contraction picks the cycle node by `argmin` instead of `argmax` when expanding the entering arc | P2 on the generator's cyclic cases (score below brute force) || [x] |
-| 3 | `masked_batch` puts `<mask>` at position `i` instead of `i + 1` (overwrites `<s>` on row 1) | P5 on any n ≥ 1 || [x] |
-| 4 | `fits` uses `n + 2` | P6 at `n = max − 2` (`fits(510, 512)` true); the "too long" witness || [x] |
-| 5 | root labels allowed off the diagonal (mask `kind` ignored for roots) | P9 (a non-root token with a `…|root` label, logits biased toward root labels) || [x] |
-| 6 | single-root fix skipped | P8 on logits with two strong diagonals (generator biases two diagonals high) || [x] |
-| 7 | goeswith constraint skipped (`r` all zero) | P11 on logits where goeswith is best leftwards || [x] |
-| 8 | merge ignores the "all pieces between are goeswith" condition | P10 (a token spanning a non-goeswith piece) on the generator's goeswith-heavy cases || [x] |
-| 9 | `form` from the unmerged first piece's range | P10 (`form ≠ sentence[range]`); the merge witness (`un` ≠ `unbelievable`) || [x] |
-| 10 | analysis maps `Parse::TooLong` to `Syntax::Unparsed` | P12 (`TooLong` expected); the metric line reads `absent (no parse)` || [x] |
-| 11 | `analyze_parsed` sets `dependency_distance: None` when any sentence is `TooLong` | P12 on a document with one long and one short sentence (`Some` expected) || [x] |
-| 12 | `parsed_nominalizations` ignores the fallback (`_` lemma stays `_`) | P13 on a `NOUN` `deliberation` with lemma `_` (1 ≠ 0) || [x] |
-| 13 | `with_parse` keeps the surface nominalizations | P14 on a parse whose `NOUN` tagging differs from the surface words (the M4 `NOMZ_CONLLU` witness: 3 ≠ 4) | [ ] |
-| 14 | `main` prints the no-model notice once per file (the per-file-load mutant is not observable without a model; this is its observable twin) | `no_model_prints_one_notice_and_keeps_stdout` with two files (2 notices ≠ 1) | [ ] |
-| 15 | `main` exits 0 when the model fails to load (treats it as "no model") | `a_missing_model_is_named_and_exits_2` | [ ] |
-| 16 | `main` lets ort load implicitly (no `init_from`) | `an_unloadable_runtime_is_named_and_exits_2` (panic → exit 101 ≠ 2) | [ ] |
-| 17 | `onnx` checks `tokenizer.json` after the runtime | `a_model_without_its_tokenizer_is_named_and_exits_2` run with `ORT_DYLIB_PATH` pointing at a missing library (stderr names the runtime, not `tokenizer.json`) | [ ] |
+| 1 | CLE returns the greedy argmax without contraction | P1 on any matrix with a greedy cycle (the cycle witness `[1, 0, 2]` is not a forest) | [x] |
+| 2 | contraction picks the cycle node by `argmin` instead of `argmax` when expanding the entering arc | P2 on the generator's cyclic cases (score below brute force) | [x] |
+| 3 | `masked_batch` puts `<mask>` at position `i` instead of `i + 1` (overwrites `<s>` on row 1) | P5 on any n ≥ 1 | [x] |
+| 4 | `fits` uses `n + 2` | P6 at `n = max − 2` (`fits(510, 512)` true); the "too long" witness | [x] |
+| 5 | root labels allowed off the diagonal (mask `kind` ignored for roots) | P9 (a non-root token with a `…|root` label, logits biased toward root labels) | [x] |
+| 6 | single-root fix skipped | P8 on logits with two strong diagonals (generator biases two diagonals high) | [x] |
+| 7 | goeswith constraint skipped (`r` all zero) | P11 on logits where goeswith is best leftwards | [x] |
+| 8 | merge ignores the "all pieces between are goeswith" condition | P10 (a token spanning a non-goeswith piece) on the generator's goeswith-heavy cases | [x] |
+| 9 | `form` from the unmerged first piece's range | P10 (`form ≠ sentence[range]`); the merge witness (`un` ≠ `unbelievable`) | [x] |
+| 10 | analysis maps `Parse::TooLong` to `Syntax::Unparsed` | P12 (`TooLong` expected); the metric line reads `absent (no parse)` | [x] |
+| 11 | `analyze_parsed` sets `dependency_distance: None` when any sentence is `TooLong` | P12 on a document with one long and one short sentence (`Some` expected) | [x] |
+| 12 | `parsed_nominalizations` ignores the fallback (`_` lemma stays `_`) | P13 on a `NOUN` `deliberation` with lemma `_` (1 ≠ 0) | [x] |
+| 13 | `with_parse` keeps the surface nominalizations | P14 on a parse whose `NOUN` tagging differs from the surface words (the M4 `NOMZ_CONLLU` witness: 3 ≠ 4) | [x] |
+| 14 | `main` prints the no-model notice once per file (the per-file-load mutant is not observable without a model; this is its observable twin) | `no_model_prints_one_notice_and_keeps_stdout` with two files (2 notices ≠ 1) | [x] |
+| 15 | `main` exits 0 when the model fails to load (treats it as "no model") | `a_missing_model_is_named_and_exits_2` | [x] |
+| 16 | `main` lets ort load implicitly (no `init_from`) | `an_unloadable_runtime_is_named_and_exits_2` (panic → exit 101 ≠ 2) | [x] |
+| 17 | `onnx` checks `tokenizer.json` after the runtime | `a_model_without_its_tokenizer_is_named_and_exits_2` run with `ORT_DYLIB_PATH` pointing at a missing library (stderr names the runtime, not `tokenizer.json`) | [x] |
 | 18 | the wiring drops the parse (`examine` calls `analyze` even with a parser) | `tests/model.rs` with `VERNIER_TEST_MODEL` set: no `CenterEmbedding` line at `:7:1:` | [ ] |
 
 Notes from the implementation:
@@ -166,6 +166,10 @@ Notes from the implementation:
 - The strict single-root pass is needed: a search over 5 million random matrices found `ud.py`'s fix leaving two roots in 12,073 of 3,064,660 multi-root cases (a node that was not a root becomes one). The witness is the first of them (5 nodes, roots 1, 3, 4 → 2, 3). The strict pass sets every diagonal but the kept root's to −∞; each column keeps a finite score, so Chu-Liu/Edmonds (optimal, P2) returns one root. It runs only where `ud.py`'s output would not be a tree, so parity is unaffected.
 - `mst::chu_liu_edmonds` gave the spike's parity-checked port's heads on all 200,000 random matrices of 1–12 nodes (scratch crate `.sdd/m3b-impl/cleparity`).
 - `LabelError` gained `NoRoot`, `NoRelation`, `MissingKey`, `NoPositions` (a label set without a root or a non-goeswith relation would leave P7 without a tree; the limits need their keys). `decode` takes no `n`: it is `pieces.len()`, so the two cannot disagree. `masked_rows(special, pieces, rows)` gives a chunk of `masked_batch`.
+- T6: the load-error tests live in `tests/onnx.rs` (they need `CARGO_TARGET_TMPDIR`), with the gated `parses_the_example_into_a_tree`. `LoadError` gained `Read` (an I/O error other than a missing file); `SpecialToken` carries the tokenizer's path; `Runtime` carries ort's error, which names the library. A missing model directory is `MissingFile { path: DIR }`. `ModelLimits::max_pieces` gives the notice's maximum (committed apart, test first).
+- T6 gotcha: `ort` 2.0.0-rc.13's `std` once-lock (`util/once_lock_std.rs`) completes its `Once` even when `init_from` fails, so a second load in the same process reads an unset library slot. vernier loads once per run and exits on failure; the runtime-failure tests run as subprocesses (`tests/cli.rs`). Seen as a flake while planting #17 in-process.
+- #16 ends in an abort (a panic inside ort's panic), not exit 101; still ≠ 2.
+- T7: `main.rs` unit tests `examine_parses_each_sentence_once` (P14's counting parser; also the positions of the too-long notices) and `a_parse_failure_names_the_sentence_position` fail under #18 as well. The non-ONNX library of `an_unloadable_runtime_is_named_and_exits_2` is the test process's `libc.so` (from `/proc/self/maps`; elsewhere a non-ELF file).
 
 ## Coverage gap (run by hand)
 
@@ -261,8 +265,8 @@ Split point if the session runs short: M3b.1 = T0–T5 (pure core, lands green w
 | T3 | M4 lemma fallback | `src/nominalization.rs` | P13 against today's code (a `_`-lemma `NOUN` `deliberation` counts 0); plant 12 | `_` → `surface_lemma(form)` | done |
 | T4 | Chu-Liu/Edmonds | `src/mst.rs`, `src/lib.rs` | P1–P4 and the cycle witness against `chu_liu_edmonds → greedy`; plants 1, 2 | port of the spike's `chu_liu_edmonds`, split | done |
 | T5 | decoder | `src/decoder.rs`, `src/lib.rs`, `Cargo.toml` (none if `serde_json` suffices) | P5–P11, label/merge/too-long witnesses against `decode → Err(Empty)`; plants 3–9 | `Labels`, `fits`, `masked_batch`, `decode` | done |
-| T6 | ONNX shell | `Cargo.toml`, `Cargo.lock`, `src/onnx.rs`, `src/lib.rs` | `onnx` unit load errors (missing dir, missing `tokenizer.json`, bad `config.json`) against `load → Err(MissingFile(dir))` for all; with `VERNIER_TEST_MODEL`: `parses_the_example_into_a_tree` | `ort` + `tokenizers`, `OnnxParser` | todo |
-| T7 | CLI wiring | `src/main.rs`, `src/summary.rs`, `tests/cli.rs` | P14; `no_model_prints_one_notice_and_keeps_stdout`, `a_missing_model_is_named_and_exits_2` (text/compact/json), `a_model_without_its_tokenizer_is_named_and_exits_2`, `an_unloadable_runtime_is_named_and_exits_2`; plants 13–17. **Changed test:** `check_accepts_every_m5_flag_and_passes_without_rules` drops `--model-path none.udpipe` (reason in the decisions table) | load once, notices, `with_parse`, exit 2 mapping | todo |
+| T6 | ONNX shell | `Cargo.toml`, `Cargo.lock`, `src/onnx.rs`, `src/lib.rs` | `onnx` unit load errors (missing dir, missing `tokenizer.json`, bad `config.json`) against `load → Err(MissingFile(dir))` for all; with `VERNIER_TEST_MODEL`: `parses_the_example_into_a_tree` | `ort` + `tokenizers`, `OnnxParser` | done |
+| T7 | CLI wiring | `src/main.rs`, `src/summary.rs`, `tests/cli.rs` | P14; `no_model_prints_one_notice_and_keeps_stdout`, `a_missing_model_is_named_and_exits_2` (text/compact/json), `a_model_without_its_tokenizer_is_named_and_exits_2`, `an_unloadable_runtime_is_named_and_exits_2`; plants 13–17. **Changed test:** `check_accepts_every_m5_flag_and_passes_without_rules` drops `--model-path none.udpipe` (reason in the decisions table) | load once, notices, `with_parse`, exit 2 mapping | done |
 | T8 | model-backed integration tests | `tests/model.rs` | `check_reports_the_examples_center_embedding`, `analyze_json_fills_the_parse_metrics`; T7's wiring precedes them, so their RED is plant 18, seen with the model; without it they print `skipped: …` | — | todo |
 | T9 | by-hand checks B1–B4, measured times | this plan (*Measured*) | — | — | todo |
 | T10 | close-out (main) | `spec.md` (ticks M3b 2–6, Status), `README.md` (model dir layout, `ORT_DYLIB_PATH`, runtime ≥ 1.17, notices), `docs/HANDOVER.md`, this plan (ticks) | `just verify`; every plant seen red; B1–B4 | — | todo |
