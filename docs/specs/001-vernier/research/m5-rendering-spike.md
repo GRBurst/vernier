@@ -29,7 +29,7 @@ JSON route:
 | Question | `serde` + `serde_json` derive | hand-written |
 | :--- | :--- | :--- |
 | String escaping (paths, `"` in messages, control characters) | correct by the library | must be re-implemented and tested |
-| `f64` | shortest round-trip form; non-finite values become `null` (vernier's values are finite, and absent values are `Option`) | must be specified |
+| `f64` | written in the shortest form that round-trips; non-finite values become `null` (vernier's values are finite, and absent values are `Option`). Reading it back exactly needs the `float_roundtrip` feature: the default parser can land one ulp off (audit 010) | must be specified |
 | Dependencies | 12 crates for both (`serde_core`, `serde_derive`, `itoa`, `memchr`, `zmij`, …); `syn`/`quote`/`proc-macro2` are already in vernier through `thiserror` | 0 |
 | Release build from clean | 7.1 s (both crates) | — |
 | License | MIT OR Apache-2.0 | — |
