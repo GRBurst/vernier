@@ -6,7 +6,9 @@ use std::ops::Range;
 
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 
-use crate::analysis::{FileAnalysis, Flag, SentenceAnalysis, SyntacticFlag, Thresholds};
+use crate::analysis::{
+    FileAnalysis, Flag, SentenceAnalysis, SentenceSyntax, SyntacticFlag, Thresholds,
+};
 use crate::position::{LineIndex, Position, PositionError};
 
 /// The code of every vernier diagnostic.
@@ -41,6 +43,8 @@ pub struct Diagnostic {
     pub source_range: Range<usize>,
     /// Surface flags first, then syntactic flags.
     pub flags: Vec<FlagMessage>,
+    /// One line per rule metric: its value, the flag it raised and its maximum.
+    pub metrics: Vec<String>,
 }
 
 /// One diagnostic per sentence of `file` that raised at least one flag, in source order.
@@ -61,6 +65,7 @@ pub fn diagnostics(
                 end: index.position(range.end)?,
                 source_range: range,
                 flags,
+                metrics: metric_lines(sentence, thresholds),
             })
         })
         .collect()
@@ -93,11 +98,24 @@ pub fn render_compact(path: &str, diagnostic: &Diagnostic) -> String {
 /// The annotated diagnostic: `warning[CognitiveOverload]`, the sentence's position, and its source
 /// lines with the whole sentence underlined.
 pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Style) -> String {
-    let group = Level::WARNING.primary_title(TITLE).id(CODE).element(
-        Snippet::source(source)
-            .path(path)
-            .annotation(AnnotationKind::Primary.span(diagnostic.source_range.clone())),
-    );
+    let listed: Vec<String> = diagnostic
+        .metrics
+        .iter()
+        .map(|m| format!("- {m}"))
+        .collect();
+    let group = Level::WARNING
+        .primary_title(TITLE)
+        .id(CODE)
+        .element(
+            Snippet::source(source)
+                .path(path)
+                .annotation(AnnotationKind::Primary.span(diagnostic.source_range.clone())),
+        )
+        .element(
+            Level::NOTE
+                .no_name()
+                .message(format!("metrics:\n{}", listed.join("\n"))),
+        );
     let renderer = match style {
         Style::Plain => Renderer::plain(),
         Style::Color => Renderer::styled(),
@@ -109,6 +127,102 @@ pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Sty
 
 /// A line width no prose line reaches, so no source line is elided.
 const RENDER_WIDTH: usize = 100_000;
+
+/// The rule metrics of a sentence, one line each: words, mean dependency distance, tree depth,
+/// subordinate clauses, then one line per center-embedding (or `none`); a syntactic metric of an
+/// unparsed sentence is `absent (no parse)`.
+pub fn metric_lines(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec<String> {
+    let words = sentence.counts.words;
+    let long = sentence.flags.contains(&Flag::LongSentence);
+    let head = format!(
+        "words: {words} ({}max {})",
+        raised(long, "LongSentence"),
+        thresholds.max_sentence_len
+    );
+    let syntactic = match &sentence.syntax {
+        None => ABSENT_WITHOUT_PARSE
+            .map(|name| format!("{name}: absent (no parse)"))
+            .to_vec(),
+        Some(syntax) => parsed_lines(syntax, thresholds),
+    };
+    std::iter::once(head).chain(syntactic).collect()
+}
+
+/// The syntactic metrics a diagnostic lists, in order.
+const ABSENT_WITHOUT_PARSE: [&str; 4] = [
+    "mean dependency distance",
+    "tree depth",
+    "subordinate clauses",
+    "center-embedding",
+];
+
+/// `"Flag, "` when the flag was raised, else nothing.
+fn raised(is_raised: bool, name: &str) -> String {
+    if is_raised {
+        format!("{name}, ")
+    } else {
+        String::new()
+    }
+}
+
+fn parsed_lines(syntax: &SentenceSyntax, thresholds: &Thresholds) -> Vec<String> {
+    let has = |wanted: fn(&SyntacticFlag) -> bool| syntax.flags.iter().any(wanted);
+    let metrics = &syntax.metrics;
+    let mdd = metrics.mdd().map_or_else(
+        || "mean dependency distance: absent (fewer than 2 content tokens)".to_owned(),
+        |mdd| {
+            let high = has(|f| matches!(f, SyntacticFlag::HighMdd { .. }));
+            format!(
+                "mean dependency distance: {mdd:.2} ({}max {:.2})",
+                raised(high, "HighMdd"),
+                thresholds.max_mdd
+            )
+        },
+    );
+    let deep = has(|f| matches!(f, SyntacticFlag::DeepTree { .. }));
+    let overload = has(|f| matches!(f, SyntacticFlag::ClauseOverload { .. }));
+    let lines = [
+        mdd,
+        format!(
+            "tree depth: {} edges ({}max {})",
+            metrics.depth,
+            raised(deep, "DeepTree"),
+            thresholds.max_tree_depth
+        ),
+        format!(
+            "subordinate clauses: {} ({}max {})",
+            metrics.clauses,
+            raised(overload, "ClauseOverload"),
+            thresholds.max_clauses
+        ),
+    ];
+    lines
+        .into_iter()
+        .chain(center_embedding_lines(syntax))
+        .collect()
+}
+
+/// One line per center-embedding flag, or `none`.
+fn center_embedding_lines(syntax: &SentenceSyntax) -> Vec<String> {
+    let embedded: Vec<String> = syntax
+        .flags
+        .iter()
+        .filter_map(|flag| match flag {
+            SyntacticFlag::CenterEmbedding(e) => Some(format!(
+                "center-embedding: subject \"{}\" separated from verb \"{}\" by {} words (CenterEmbedding)",
+                e.subject, e.verb, e.words_between
+            )),
+            SyntacticFlag::HighMdd { .. }
+            | SyntacticFlag::DeepTree { .. }
+            | SyntacticFlag::ClauseOverload { .. } => None,
+        })
+        .collect();
+    if embedded.is_empty() {
+        vec!["center-embedding: none".to_owned()]
+    } else {
+        embedded
+    }
+}
 
 /// The messages of a sentence's flags: its surface flags, then its syntactic flags.
 pub fn flag_messages(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec<FlagMessage> {
@@ -176,11 +290,14 @@ fn syntactic_message(flag: &SyntacticFlag, thresholds: &Thresholds) -> FlagMessa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::{SentenceSyntax, analyze};
+    use crate::analysis::{analyze, syntactic_flags};
+    use crate::dependency::DependencyTree;
     use crate::nominalization::NominalizationCount;
     use crate::prose::SourceFormat;
     use crate::readability::SurfaceCounts;
+    use crate::syntax::syntactic_metrics;
     use crate::syntax::{CenterEmbedding, DependencyDistance, SyntacticMetrics};
+    use crate::testing::{EXAMPLE_CONLLU, tokens_from_conllu};
     use proptest::prelude::*;
 
     const THRESHOLDS: Thresholds = Thresholds {
@@ -367,6 +484,114 @@ mod tests {
         assert_eq!(text.lines().nth(1).map(str::trim), Some("--> long.md:3:20"));
     }
 
+    /// A sentence of `words` words with the flags `analyze` would give it under `t`, parsed into
+    /// `metrics` or not parsed.
+    fn measured(
+        words: usize,
+        metrics: Option<SyntacticMetrics>,
+        t: &Thresholds,
+    ) -> SentenceAnalysis {
+        SentenceAnalysis {
+            source_range: 0..1,
+            counts: SurfaceCounts {
+                words,
+                sentences: 1,
+                ..Default::default()
+            },
+            readability: None,
+            flags: (words > t.max_sentence_len)
+                .then_some(Flag::LongSentence)
+                .into_iter()
+                .collect(),
+            syntax: metrics.map(|metrics| SentenceSyntax {
+                flags: syntactic_flags(&metrics, t),
+                metrics,
+                passives: Vec::new(),
+            }),
+            nominalizations: NominalizationCount::default(),
+        }
+    }
+
+    /// Given the UDPipe 2 parse of the M3a example sentence (13 words, MDD 32/12, depth 4,
+    /// 1 clause, one center-embedding) and `max_mdd` 2.5
+    /// When its metric lines are listed
+    /// Then each rule metric shows its value, the flag it raised and its maximum
+    #[test]
+    fn lists_the_rule_metrics_of_the_parsed_example() {
+        let t = Thresholds {
+            max_mdd: 2.5,
+            ..THRESHOLDS
+        };
+        let tree = DependencyTree::new(tokens_from_conllu(EXAMPLE_CONLLU)).unwrap();
+        let sentence = measured(13, Some(syntactic_metrics(&tree)), &t);
+        assert_eq!(
+            metric_lines(&sentence, &t),
+            [
+                "words: 13 (max 25)",
+                "mean dependency distance: 2.67 (HighMdd, max 2.50)",
+                "tree depth: 4 edges (max 5)",
+                "subordinate clauses: 1 (max 2)",
+                "center-embedding: subject \"proposal\" separated from verb \"caused\" by 8 words (CenterEmbedding)",
+            ]
+        );
+    }
+
+    /// Given an unparsed 30-word sentence
+    /// When its diagnostic is rendered as text
+    /// Then a `= metrics:` footer lists the words with LongSentence and each syntactic metric as
+    /// absent (no parse)
+    #[test]
+    fn the_text_footer_lists_the_metrics() {
+        let source = include_str!("../tests/fixtures/long.md");
+        let file = analyze(source, SourceFormat::Markdown, &THRESHOLDS);
+        let found = diagnostics(source, &file, &THRESHOLDS).unwrap();
+        let text = render_text("long.md", source, &found[0], Style::Plain);
+        let footer: Vec<&str> = text
+            .lines()
+            .skip_while(|l| !l.contains("= metrics:"))
+            .map(str::trim)
+            .collect();
+        assert_eq!(
+            footer,
+            [
+                "= metrics:",
+                "- words: 30 (LongSentence, max 25)",
+                "- mean dependency distance: absent (no parse)",
+                "- tree depth: absent (no parse)",
+                "- subordinate clauses: absent (no parse)",
+                "- center-embedding: absent (no parse)",
+            ],
+            "{text}"
+        );
+    }
+
+    fn metrics_or_none() -> impl Strategy<Value = Option<SyntacticMetrics>> {
+        let embedding = (0usize..12).prop_map(|words_between| CenterEmbedding {
+            subject: "proposal".to_owned(),
+            verb: "caused".to_owned(),
+            words_between,
+        });
+        let metrics = (
+            0usize..20,
+            1usize..4,
+            0usize..9,
+            0usize..5,
+            prop::collection::vec(embedding, 0..3),
+        )
+            .prop_map(|(dependencies, per, depth, clauses, center_embeddings)| {
+                SyntacticMetrics {
+                    distance: DependencyDistance {
+                        total: dependencies * per,
+                        dependencies,
+                    },
+                    depth,
+                    clauses,
+                    center_embeddings,
+                }
+            });
+        prop::option::weighted(0.7, metrics)
+    }
+
     /// Paragraphs of sentences of 1–12 words, some multi-byte, some with inline markup, LF or CRLF.
     fn document() -> impl Strategy<Value = String> {
         let word = prop::sample::select(vec![
@@ -381,6 +606,46 @@ mod tests {
     }
 
     proptest! {
+        /// Given any sentence, parsed or not, and thresholds that equal its metrics half the time
+        /// When its metric lines are listed
+        /// Then the words line names LongSentence exactly when the words exceed the maximum; an
+        /// unparsed sentence has its four syntactic lines absent; a parsed one names HighMdd,
+        /// DeepTree and ClauseOverload exactly when it raised them, and lists one center-embedding
+        /// line per CenterEmbedding flag
+        #[test]
+        fn metric_lines_name_exactly_the_raised_flags(
+            words in 1usize..40,
+            metrics in metrics_or_none(),
+            same in any::<[bool; 4]>(),
+            other in (0usize..40, 0.5f64..4.0, 0usize..9, 0usize..5),
+        ) {
+            let mdd = metrics.as_ref().and_then(SyntacticMetrics::mdd);
+            let t = Thresholds {
+                max_sentence_len: if same[0] { words } else { other.0 },
+                max_mdd: match (same[1], mdd) { (true, Some(m)) => m, _ => other.1 },
+                max_tree_depth: match (same[2], &metrics) { (true, Some(m)) => m.depth, _ => other.2 },
+                max_clauses: match (same[3], &metrics) { (true, Some(m)) => m.clauses, _ => other.3 },
+            };
+            let sentence = measured(words, metrics, &t);
+            let lines = metric_lines(&sentence, &t);
+            prop_assert_eq!(lines[0].contains("LongSentence"), words > t.max_sentence_len, "{}", lines[0]);
+            match &sentence.syntax {
+                None => {
+                    prop_assert_eq!(lines.len(), 5);
+                    prop_assert!(lines[1..].iter().all(|l| l.ends_with("absent (no parse)")), "{:?}", lines);
+                }
+                Some(syntax) => {
+                    let raised = |name: &str| syntax.flags.iter().any(|f| syntactic_message(f, &t).name == name);
+                    prop_assert_eq!(lines[1].contains("HighMdd"), raised("HighMdd"), "{}", lines[1]);
+                    prop_assert_eq!(lines[2].contains("DeepTree"), raised("DeepTree"), "{}", lines[2]);
+                    prop_assert_eq!(lines[3].contains("ClauseOverload"), raised("ClauseOverload"), "{}", lines[3]);
+                    let embedded = syntax.flags.iter().filter(|f| matches!(f, SyntacticFlag::CenterEmbedding(_))).count();
+                    let listed = lines[4..].iter().filter(|l| l.contains("(CenterEmbedding)")).count();
+                    prop_assert_eq!(listed, embedded, "{:?}", lines);
+                }
+            }
+        }
+
         /// Given generated documents with every sentence flagged
         /// When each diagnostic is rendered as text, plain and in colour
         /// Then it opens with `warning[CognitiveOverload]` and the title, then ` --> path:line:col`
