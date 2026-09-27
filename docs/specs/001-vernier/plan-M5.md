@@ -170,8 +170,8 @@ Each names the input where the mutant differs (audit 005).
 
 | # | Plant | Must fail (input) | Seen |
 | :--- | :--- | :--- | :--- |
-| 1 | one diagnostic per flag instead of per sentence | P1; two-flag witness (2 ≠ 1) | [ ] |
-| 2 | `end = start` | P2 on any sentence of ≥ 2 chars (`One two.`: 1:9 ≠ 1:1) | [ ] |
+| 1 | one diagnostic per flag instead of per sentence | P1; two-flag witness (2 ≠ 1) | [x] (witness red; P1 stays green — its generated documents raise at most one flag, `LongSentence`, per sentence, so only the witness reaches the mutant) |
+| 2 | `end = start` | P2 on any sentence of ≥ 2 chars (`One two.`: 1:9 ≠ 1:1) | [x] |
 | 3 | compact code = the first flag's name | compact witness on `long.md` (`LongSentence` ≠ `CognitiveOverload`) | [ ] |
 | 4 | compact joins flags with `, ` | two-flag witness | [ ] |
 | 5 | `Style` ignores `NO_COLOR` | style law at `(true, Some("1"))` | [ ] |
@@ -275,7 +275,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13;
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | T0 | spike, spec clarification, plan | `research/m5-rendering-spike.md`, `spec.md`, this plan | — (docs) | criteria clarified in place | done |
 | T1 | refactor: messages into the core | `src/diagnostic.rs`, `src/lib.rs`, `src/main.rs` | — (refactor). Evidence: `describes_each_syntactic_flag_with_its_value` and `diagnostics_list_surface_then_syntactic_flags_per_sentence` move with unchanged assertions; all `tests/cli.rs` `check` tests green before and after | `FlagMessage`, `flag_messages`; `main` prints `{path}:{l}:{c}: {flag}` from them | done |
-| T2 | diagnostic model | `src/diagnostic.rs`, `src/main.rs` | P1, P2, two-flag witness against `diagnostics → vec![]`; plants 1, 2 | `Diagnostic`, `diagnostics`; `main`'s per-flag lines are built from it (output unchanged) | todo |
+| T2 | diagnostic model | `src/diagnostic.rs`, `src/main.rs` | P1, P2, two-flag witness against `diagnostics → vec![]`; plants 1, 2 | `Diagnostic`, `diagnostics`; `main`'s per-flag lines are built from it (output unchanged) | done |
 | T3 | compact format | `src/diagnostic.rs`, `src/main.rs`, `tests/cli.rs` | P3 and `check_compact_prints_one_line_per_flagged_sentence` (long.md) against `render_compact → String::new()`; plants 3, 4 | `render_compact`; `--format compact` for `check` | todo |
 | T4 | text renderer | `Cargo.toml`, `Cargo.lock`, `src/diagnostic.rs` | P4, P5, P6, style law against `render_text → String::new()` and `for_output → Plain`; plants 5, 6, 7, 9 (on a unit copy of `long.md`) | `annotate-snippets` 0.12, `Style`, `render_text` (no footer yet) | todo |
 | T5 | metric lines | `src/diagnostic.rs` | P7 and the parsed-example witness against `metric_lines → vec![]`; plants 10, 11 | `metric_lines`, `= metrics:` footer | todo |

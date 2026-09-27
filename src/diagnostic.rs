@@ -1,8 +1,46 @@
 //! Diagnostics (spec 001 M5): what a flagged sentence reports, and how it is rendered.
 
 use std::fmt;
+use std::ops::Range;
 
-use crate::analysis::{Flag, SentenceAnalysis, SyntacticFlag, Thresholds};
+use crate::analysis::{FileAnalysis, Flag, SentenceAnalysis, SyntacticFlag, Thresholds};
+use crate::position::{LineIndex, Position, PositionError};
+
+/// The code of every vernier diagnostic.
+pub const CODE: &str = "CognitiveOverload";
+
+/// What one flagged sentence reports: where it starts and ends, and the flags it raised.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Diagnostic {
+    pub start: Position,
+    pub end: Position,
+    pub source_range: Range<usize>,
+    /// Surface flags first, then syntactic flags.
+    pub flags: Vec<FlagMessage>,
+}
+
+/// One diagnostic per sentence of `file` that raised at least one flag, in source order.
+pub fn diagnostics(
+    source: &str,
+    file: &FileAnalysis,
+    thresholds: &Thresholds,
+) -> Result<Vec<Diagnostic>, PositionError> {
+    let index = LineIndex::new(source);
+    file.sentences
+        .iter()
+        .map(|sentence| (sentence, flag_messages(sentence, thresholds)))
+        .filter(|(_, flags)| !flags.is_empty())
+        .map(|(sentence, flags)| {
+            let range = sentence.source_range.clone();
+            Ok(Diagnostic {
+                start: index.position(range.start)?,
+                end: index.position(range.end)?,
+                source_range: range,
+                flags,
+            })
+        })
+        .collect()
+}
 
 /// One flag of a sentence, named, with the measured value and its maximum in words.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +121,12 @@ fn syntactic_message(flag: &SyntacticFlag, thresholds: &Thresholds) -> FlagMessa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::CenterEmbedding;
+    use crate::analysis::{SentenceSyntax, analyze};
+    use crate::nominalization::NominalizationCount;
+    use crate::prose::SourceFormat;
+    use crate::readability::SurfaceCounts;
+    use crate::syntax::{CenterEmbedding, DependencyDistance, SyntacticMetrics};
+    use proptest::prelude::*;
 
     const THRESHOLDS: Thresholds = Thresholds {
         max_sentence_len: 25,
@@ -122,6 +165,112 @@ mod tests {
         ];
         for (flag, expected) in cases {
             assert_eq!(syntactic_message(&flag, &THRESHOLDS).to_string(), expected);
+        }
+    }
+
+    fn sentence(
+        source_range: Range<usize>,
+        words: usize,
+        flags: Vec<Flag>,
+        syntactic: Vec<SyntacticFlag>,
+    ) -> SentenceAnalysis {
+        let metrics = SyntacticMetrics {
+            distance: DependencyDistance::default(),
+            depth: 0,
+            clauses: 0,
+            center_embeddings: Vec::new(),
+        };
+        SentenceAnalysis {
+            source_range,
+            counts: SurfaceCounts {
+                words,
+                sentences: 1,
+                ..Default::default()
+            },
+            readability: None,
+            flags,
+            syntax: Some(SentenceSyntax {
+                metrics,
+                flags: syntactic,
+                passives: Vec::new(),
+            }),
+            nominalizations: NominalizationCount::default(),
+        }
+    }
+
+    fn file_of(sentences: Vec<SentenceAnalysis>) -> FileAnalysis {
+        FileAnalysis {
+            spans: 1,
+            sentences,
+            totals: SurfaceCounts::default(),
+            readability: None,
+            dependency_distance: None,
+            nominalizations: NominalizationCount::default(),
+            passives: None,
+        }
+    }
+
+    /// Given three sentences: the first flagged LongSentence and DeepTree, the second unflagged,
+    /// the third flagged HighMdd only
+    /// When the diagnostics are built
+    /// Then there are two, one per flagged sentence: the first with both flags (surface first),
+    /// the second at line 3 with its syntactic flag
+    #[test]
+    fn one_diagnostic_per_flagged_sentence_with_all_its_flags() {
+        let source = "First sentence.\nFine one.\nThird one.\n";
+        let file = file_of(vec![
+            sentence(
+                0..15,
+                30,
+                vec![Flag::LongSentence],
+                vec![SyntacticFlag::DeepTree { depth: 6 }],
+            ),
+            sentence(16..25, 2, vec![], vec![]),
+            sentence(26..36, 2, vec![], vec![SyntacticFlag::HighMdd { mdd: 3.5 }]),
+        ]);
+        let found = diagnostics(source, &file, &THRESHOLDS).unwrap();
+        let names: Vec<Vec<&str>> = found
+            .iter()
+            .map(|d| d.flags.iter().map(|f| f.name).collect())
+            .collect();
+        assert_eq!(names, [vec!["LongSentence", "DeepTree"], vec!["HighMdd"]]);
+        assert_eq!(found[0].source_range, 0..15);
+        assert_eq!((found[1].start.line(), found[1].start.column()), (3, 1));
+        assert_eq!((found[1].end.line(), found[1].end.column()), (3, 11));
+    }
+
+    /// Paragraphs of sentences of 1–12 words, some multi-byte, some with inline markup, LF or CRLF.
+    fn document() -> impl Strategy<Value = String> {
+        let word = prop::sample::select(vec![
+            "word", "Café", "漢字", "**bold**", "*it*", "x2", "naïve",
+        ]);
+        let sentence = prop::collection::vec(word, 1..12).prop_map(|w| format!("{}.", w.join(" ")));
+        let para = prop::collection::vec(sentence, 1..4).prop_map(|s| s.join(" "));
+        (prop::collection::vec(para, 0..4), any::<bool>()).prop_map(|(p, crlf)| {
+            let lf = format!("{}\n", p.join("\n\n"));
+            if crlf { lf.replace('\n', "\r\n") } else { lf }
+        })
+    }
+
+    proptest! {
+        /// Given generated documents and any sentence-length limit
+        /// When their diagnostics are built
+        /// Then there is one per flagged sentence, in source order, with that sentence's flag
+        /// messages, starting and ending at the positions of the sentence's first and end offsets
+        #[test]
+        fn diagnostics_follow_the_flagged_sentences(doc in document(), max in 0usize..12) {
+            let t = Thresholds { max_sentence_len: max, ..THRESHOLDS };
+            let file = analyze(&doc, SourceFormat::Markdown, &t);
+            let found = diagnostics(&doc, &file, &t).unwrap();
+            let flagged: Vec<&SentenceAnalysis> = file.sentences.iter().filter(|s| !flag_messages(s, &t).is_empty()).collect();
+            prop_assert_eq!(found.len(), flagged.len());
+            let index = LineIndex::new(&doc);
+            for (d, s) in found.iter().zip(flagged) {
+                prop_assert_eq!(&d.source_range, &s.source_range);
+                prop_assert_eq!(&d.flags, &flag_messages(s, &t));
+                prop_assert_eq!(d.start, index.position(s.source_range.start).unwrap());
+                prop_assert_eq!(d.end, index.position(s.source_range.end).unwrap());
+            }
         }
     }
 }

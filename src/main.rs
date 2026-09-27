@@ -8,8 +8,8 @@ use std::process::ExitCode;
 use clap::Parser;
 use vernier::analysis::{self, FileAnalysis, Thresholds};
 use vernier::cli::{Args, Cli, Command};
-use vernier::diagnostic::flag_messages;
-use vernier::position::{LineIndex, PositionError};
+use vernier::diagnostic;
+use vernier::position::PositionError;
 use vernier::prose::SourceFormat;
 use vernier::summary::{render, summarize};
 
@@ -98,33 +98,28 @@ fn check(args: &Args, path: &Path, source: &str) -> FileOutcome {
     }
 }
 
-/// One line per flag of every sentence, at the position of the sentence's first character: each
-/// sentence's surface flags, then its syntactic flags.
+/// One line per flag of every flagged sentence, at the position of the sentence's first
+/// character: each sentence's surface flags, then its syntactic flags.
 fn diagnostics(
     path: &Path,
     source: &str,
     analysis: &FileAnalysis,
     thresholds: &Thresholds,
 ) -> Result<Vec<String>, PositionError> {
-    let index = LineIndex::new(source);
-    analysis
-        .sentences
+    let found = diagnostic::diagnostics(source, analysis, thresholds)?;
+    Ok(found
         .iter()
-        .flat_map(|sentence| {
-            flag_messages(sentence, thresholds)
-                .into_iter()
-                .map(move |message| (sentence, message))
+        .flat_map(|d| {
+            d.flags.iter().map(move |flag| {
+                format!(
+                    "{}:{}:{}: {flag}",
+                    path.display(),
+                    d.start.line(),
+                    d.start.column()
+                )
+            })
         })
-        .map(|(sentence, message)| {
-            let at = index.position(sentence.source_range.start)?;
-            Ok(format!(
-                "{}:{}:{}: {message}",
-                path.display(),
-                at.line(),
-                at.column(),
-            ))
-        })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
