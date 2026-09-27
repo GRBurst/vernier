@@ -89,13 +89,26 @@ pub fn surface_nominalizations<'a>(
         .count()
 }
 
-/// The number of nominalizations among a parse's `NOUN` tokens, each read through its lemma.
+/// The number of nominalizations among a parse's `NOUN` tokens, each read through its lemma, or
+/// through its form's surface lemma when the parser gave none (`_`, spec 001 M4 criterion 1).
 pub fn parsed_nominalizations(tokens: &[Token], stoplist: &Stoplist) -> usize {
     tokens
         .iter()
-        .filter(|token| token.upostag == "NOUN" && is_nominalization(&token.lemma, stoplist))
+        .filter(|token| token.upostag == "NOUN" && is_nominalization(&lemma_of(token), stoplist))
         .count()
 }
+
+/// A token's lemma, or its form's surface lemma when the parser gave none.
+fn lemma_of(token: &Token) -> String {
+    if token.lemma == NO_LEMMA {
+        surface_lemma(&token.form)
+    } else {
+        token.lemma.clone()
+    }
+}
+
+/// The CoNLL-U value of a missing lemma.
+const NO_LEMMA: &str = "_";
 
 /// Nominalizations and words; they add up across sentences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -210,6 +223,21 @@ mod tests {
         assert_eq!(parsed_nominalizations(&tokens, &stoplist), 1);
     }
 
+    /// Given a `NOUN` `deliberation` whose lemma is `_` (the ONNX parser gives no lemma), and a
+    /// `NOUN` `cities` with lemma `_`
+    /// When nominalizations are counted from the parse
+    /// Then `deliberation` counts through its surface lemma, and `cities` (surface lemma `city`,
+    /// stoplisted) does not
+    #[test]
+    fn a_missing_lemma_falls_back_to_the_surface_lemma() {
+        let stoplist = Stoplist::committed();
+        let tokens = [
+            token("deliberation", "_", "NOUN"),
+            token("cities", "_", "NOUN"),
+        ];
+        assert_eq!(parsed_nominalizations(&tokens, &stoplist), 1);
+    }
+
     /// Given words with and without plural, possessive and capital letters
     /// When their surface lemma is taken
     /// Then possessives go first, `-ies` reads as `-y`, one final `-s` goes unless after `s`
@@ -281,7 +309,56 @@ mod tests {
         )
     }
 
+    /// Parsed tokens: forms mixing nominalizations (plural, possessive, capitalized, stoplisted)
+    /// and other words, tagged `NOUN` or `VERB`, with the lemma `_` or their surface lemma.
+    fn parsed_tokens() -> impl Strategy<Value = Vec<Token>> {
+        let form = prop::sample::select(vec![
+            "deliberation",
+            "Decisions",
+            "committee's",
+            "activities",
+            "cities",
+            "rations",
+            "run",
+            "implementation",
+        ]);
+        let one = (
+            form,
+            prop::sample::select(vec!["NOUN", "VERB"]),
+            any::<bool>(),
+        )
+            .prop_map(|(form, upostag, missing)| {
+                let lemma = if missing {
+                    "_".to_owned()
+                } else {
+                    surface_lemma(form)
+                };
+                token(form, &lemma, upostag)
+            });
+        prop::collection::vec(one, 0..12)
+    }
+
     proptest! {
+        /// Given parsed tokens, some with the lemma `_`
+        /// When nominalizations are counted from the parse
+        /// Then the count is the surface count over the `_`-lemma `NOUN` forms plus the parsed
+        /// count over the tokens with a lemma; so with every lemma `_` it is the surface count
+        /// over the `NOUN` forms
+        #[test]
+        fn missing_lemmas_count_like_surface_words(tokens in parsed_tokens()) {
+            let stoplist = Stoplist::committed();
+            let (missing, lemmatized): (Vec<Token>, Vec<Token>) =
+                tokens.iter().cloned().partition(|t| t.lemma == "_");
+            let surface = surface_nominalizations(
+                missing.iter().filter(|t| t.upostag == "NOUN").map(|t| t.form.as_str()),
+                &stoplist,
+            );
+            prop_assert_eq!(
+                parsed_nominalizations(&tokens, &stoplist),
+                surface + parsed_nominalizations(&lemmatized, &stoplist)
+            );
+        }
+
         /// Given any lower-case lemma ending in a nominalization suffix
         /// When its plural (`+s`, and for `-ity` also `-ies`) is lemmatized
         /// Then the lemma comes back

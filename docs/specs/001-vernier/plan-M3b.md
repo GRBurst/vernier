@@ -151,7 +151,7 @@ Each names the input where the mutant differs (audit 005).
 | 9 | `form` from the unmerged first piece's range | P10 (`form ≠ sentence[range]`); the merge witness (`un` ≠ `unbelievable`) | [ ] |
 | 10 | analysis maps `Parse::TooLong` to `Syntax::Unparsed` | P12 (`TooLong` expected); the metric line reads `absent (no parse)` || [x] |
 | 11 | `analyze_parsed` sets `dependency_distance: None` when any sentence is `TooLong` | P12 on a document with one long and one short sentence (`Some` expected) || [x] |
-| 12 | `parsed_nominalizations` ignores the fallback (`_` lemma stays `_`) | P13 on a `NOUN` `deliberation` with lemma `_` (1 ≠ 0) | [ ] |
+| 12 | `parsed_nominalizations` ignores the fallback (`_` lemma stays `_`) | P13 on a `NOUN` `deliberation` with lemma `_` (1 ≠ 0) || [x] |
 | 13 | `with_parse` keeps the surface nominalizations | P14 on a parse whose `NOUN` tagging differs from the surface words (the M4 `NOMZ_CONLLU` witness: 3 ≠ 4) | [ ] |
 | 14 | `main` prints the no-model notice once per file (the per-file-load mutant is not observable without a model; this is its observable twin) | `no_model_prints_one_notice_and_keeps_stdout` with two files (2 notices ≠ 1) | [ ] |
 | 15 | `main` exits 0 when the model fails to load (treats it as "no model") | `a_missing_model_is_named_and_exits_2` | [ ] |
@@ -250,7 +250,7 @@ Split point if the session runs short: M3b.1 = T0–T5 (pure core, lands green w
 | T0 | plan, ADR, devenv runtime | this plan, `docs/adr/0001-onnx-runtime-via-ort.md`, `devenv.nix` | — (docs, env) | — | done |
 | T1 | refactor: `Option<SentenceSyntax>` → `Syntax { Unparsed, Parsed }` | `src/analysis.rs`, `src/diagnostic.rs` | — (refactor). Evidence: every existing test green before and after with unchanged assertions (`None` → `Syntax::Unparsed`, `Some(x)` → `Syntax::Parsed(x)` in literals and matches) | the enum, `Syntax::parsed()` | done |
 | T2 | the seam: `&mut self`, `Parse::TooLong`, `Syntax::TooLong`, parse-error position | `src/dependency.rs`, `src/analysis.rs`, `src/diagnostic.rs` | P12 with a `TooLongParser`, `a_too_long_sentence_reads_absent_too_long_for_the_model`, `a_parse_error_names_the_sentence_start`; plants 10, 11. **Changed test code (not assertions):** the test parsers implement `parse(&mut self)` and wrap tokens in `Parse::Tokens` | trait, enums, `analyze_parsed(&mut P)` | done |
-| T3 | M4 lemma fallback | `src/nominalization.rs` | P13 against today's code (a `_`-lemma `NOUN` `deliberation` counts 0); plant 12 | `_` → `surface_lemma(form)` | todo |
+| T3 | M4 lemma fallback | `src/nominalization.rs` | P13 against today's code (a `_`-lemma `NOUN` `deliberation` counts 0); plant 12 | `_` → `surface_lemma(form)` | done |
 | T4 | Chu-Liu/Edmonds | `src/mst.rs`, `src/lib.rs` | P1–P4 and the cycle witness against `chu_liu_edmonds → greedy`; plants 1, 2 | port of the spike's `chu_liu_edmonds`, split | todo |
 | T5 | decoder | `src/decoder.rs`, `src/lib.rs`, `Cargo.toml` (none if `serde_json` suffices) | P5–P11, label/merge/too-long witnesses against `decode → Err(Empty)`; plants 3–9 | `Labels`, `fits`, `masked_batch`, `decode` | todo |
 | T6 | ONNX shell | `Cargo.toml`, `Cargo.lock`, `src/onnx.rs`, `src/lib.rs` | `onnx` unit load errors (missing dir, missing `tokenizer.json`, bad `config.json`) against `load → Err(MissingFile(dir))` for all; with `VERNIER_TEST_MODEL`: `parses_the_example_into_a_tree` | `ort` + `tokenizers`, `OnnxParser` | todo |
