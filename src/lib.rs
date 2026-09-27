@@ -8,6 +8,7 @@ pub mod block;
 pub mod cli;
 pub mod dependency;
 pub mod diagnostic;
+pub mod json;
 pub mod nominalization;
 pub mod passive;
 pub mod position;
