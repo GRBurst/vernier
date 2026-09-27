@@ -2,13 +2,14 @@
 //!
 //! The imperative shell: read files, call the pure core, print, and map the outcome to an exit code.
 
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Parser;
 use vernier::analysis::{self, Thresholds};
 use vernier::cli::{Args, Cli, Command, OutputFormat};
-use vernier::diagnostic::{self, Diagnostic};
+use vernier::diagnostic::{self, Diagnostic, Style};
 use vernier::prose::SourceFormat;
 use vernier::summary::{render, summarize};
 
@@ -72,7 +73,7 @@ fn analyze(_args: &Args, path: &Path, source: &str) -> FileOutcome {
 }
 
 /// Prints the diagnostics of one file in the chosen format; `json` prints per-flag lines until
-/// M5 renders it.
+/// M5 T9 renders it.
 fn check(args: &Args, path: &Path, source: &str) -> FileOutcome {
     let thresholds = Thresholds {
         max_sentence_len: args.max_sentence_len,
@@ -84,9 +85,9 @@ fn check(args: &Args, path: &Path, source: &str) -> FileOutcome {
     match diagnostic::diagnostics(source, &analysis, &thresholds) {
         Ok(found) if found.is_empty() => FileOutcome::Clean,
         Ok(found) => {
-            rendered(args.format, path, &found)
+            rendered(args.format, path, source, &found)
                 .iter()
-                .for_each(|line| println!("{line}"));
+                .for_each(|block| println!("{block}"));
             FileOutcome::Flagged
         }
         Err(err) => {
@@ -99,15 +100,25 @@ fn check(args: &Args, path: &Path, source: &str) -> FileOutcome {
     }
 }
 
-/// The lines `check` prints for the diagnostics of one file.
-fn rendered(format: OutputFormat, path: &Path, found: &[Diagnostic]) -> Vec<String> {
+/// What `check` prints for the diagnostics of one file: one block or line per diagnostic.
+fn rendered(format: OutputFormat, path: &Path, source: &str, found: &[Diagnostic]) -> Vec<String> {
     let path = path.display().to_string();
     match format {
+        OutputFormat::Text => {
+            let style = Style::for_output(
+                std::io::stdout().is_terminal(),
+                std::env::var_os("NO_COLOR").as_deref(),
+            );
+            found
+                .iter()
+                .map(|d| format!("{}\n", diagnostic::render_text(&path, source, d, style)))
+                .collect()
+        }
         OutputFormat::Compact => found
             .iter()
             .map(|d| diagnostic::render_compact(&path, d))
             .collect(),
-        OutputFormat::Text | OutputFormat::Json => per_flag_lines(&path, found),
+        OutputFormat::Json => per_flag_lines(&path, found),
     }
 }
 

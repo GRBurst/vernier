@@ -142,7 +142,7 @@ Expected rejections:
 - `long.md` (M2 fixture, 30-word sentence at 3:20):
   - compact: `{path}:3:20: CognitiveOverload: LongSentence: sentence has 30 words (max 25)`;
   - text: header as P4, ` --> {path}:3:20`, the whole line shown (no `...`), `= metrics:` with `- words: 30 (LongSentence, max 25)` and `- mean dependency distance: absent (no parse)`.
-- `wrapped.md` (new): `Short opener. This sentence is\nhard-wrapped over three lines\nof the file until it ends.\n`, with `--max-sentence-len 5` (the opener's 2 words pass, the second sentence's 15 do not). The text diagnostic points at 1:15, and the underline starts under column 15 of line 1 and closes on line 3 (`|___…^`).
+- `wrapped.md` (new): `Short opener. This sentence is\nhard-wrapped over three lines\nof the file until it ends.\n`, with `--max-sentence-len 5` (the opener's 2 words pass, the second sentence's 14 do not; `hard-wrapped` is two UAX #29 words). The text diagnostic points at 1:15, and the underline starts under column 15 of line 1 and closes on line 3 (`|___…^`).
 - Two flags: the hand-built sentence of main's current test (`LongSentence` + `DeepTree { depth: 6 }`) gives one diagnostic with `flags.len() == 2`, and compact joins them with `; `.
 - Parsed example (`EXAMPLE_CONLLU`, `max_mdd` 2.5), metric lines:
   - `- mean dependency distance: 2.67 (HighMdd, max 2.50)`
@@ -177,11 +177,11 @@ Each names the input where the mutant differs (audit 005).
 | 5 | `Style` ignores `NO_COLOR` | style law at `(true, Some("1"))` | [x] |
 | 6 | `Style` treats an empty `NO_COLOR` as set | style law at `(true, Some(""))` | [x] |
 | 7 | `render_text` always uses `Renderer::styled()` | P5 (`Plain` has `\x1b`) on any diagnostic | [x] |
-| 8 | the annotation span ends at the end of the sentence's first line | `wrapped.md` witness (no closing marker on line 3) | [ ] |
+| 8 | the annotation span ends at the end of the sentence's first line | `wrapped.md` witness (no closing marker on line 3) | [x] |
 | 9 | default `term_width` (140) | `long.md` text witness (the line is shown with `...`) | [x] (unit copy `a_long_line_is_shown_whole`; P6 red too) |
 | 10 | `words` line uses `>=` | P7 with `words == max` (the generator draws `max = words` half the time) | [x] (red 2/2) |
 | 11 | syntactic lines print `0` when `syntax = None` | P7 on any unparsed sentence | [x] (P7 and the `long.md` footer witness red) |
-| 12 | `main` passes `Style::Color` unconditionally | `check_writes_no_escape_codes_off_a_terminal` | [ ] |
+| 12 | `main` passes `Style::Color` unconditionally | `check_writes_no_escape_codes_off_a_terminal` | [x] |
 | 13 | the table drops the `passive voice` row | P9; `sample.md` table witness | [ ] |
 | 14 | JSON `line` 0-based | P8; JSON witness (2 ≠ 3) | [ ] |
 | 15 | `schema_version: 2` | P8 | [ ] |
@@ -279,7 +279,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13;
 | T3 | compact format | `src/diagnostic.rs`, `src/main.rs`, `tests/cli.rs` | P3 and `check_compact_prints_one_line_per_flagged_sentence` (long.md) against `render_compact → String::new()`; plants 3, 4 | `render_compact`; `--format compact` for `check` | done |
 | T4 | text renderer | `Cargo.toml`, `Cargo.lock`, `src/diagnostic.rs` | P4, P5, P6, style law against `render_text → String::new()` and `for_output → Plain`; plants 5, 6, 7, 9 (on a unit copy of `long.md`) | `annotate-snippets` 0.12, `Style`, `render_text` (no footer yet) | done |
 | T5 | metric lines | `src/diagnostic.rs` | P7 and the parsed-example witness against `metric_lines → vec![]`; plants 10, 11 | `metric_lines`, `= metrics:` footer | done |
-| T6 | `check` defaults to the annotated text | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/wrapped.md` | `check_prints_a_cognitive_overload_diagnostic` (long.md), `check_underlines_a_hard_wrapped_sentence` (wrapped.md), `check_writes_no_escape_codes_off_a_terminal` (with and without `NO_COLOR`); plants 8, 12. **Changed tests:** `check_flags_a_long_sentence_and_exits_1`, `max_sentence_len_raises_the_bar` and `check_flags_the_samples_13_word_sentence_over_a_limit_of_10` pin today's one-line output. They gain `--format compact`, and `CognitiveOverload: ` is inserted in their expected lines: M5 makes the annotated diagnostic the default, and their laws (position, threshold boundary, exit code) are kept unchanged in compact | text as the default for `check` | todo |
+| T6 | `check` defaults to the annotated text | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/wrapped.md` | `check_prints_a_cognitive_overload_diagnostic` (long.md), `check_underlines_a_hard_wrapped_sentence` (wrapped.md), `check_writes_no_escape_codes_off_a_terminal` (with and without `NO_COLOR`); plants 8, 12. **Changed tests:** `check_flags_a_long_sentence_and_exits_1`, `max_sentence_len_raises_the_bar` and `check_flags_the_samples_13_word_sentence_over_a_limit_of_10` pin today's one-line output. They gain `--format compact`, and `CognitiveOverload: ` is inserted in their expected lines: M5 makes the annotated diagnostic the default, and their laws (position, threshold boundary, exit code) are kept unchanged in compact | text as the default for `check` | done |
 | T7 | `analyze` table | `src/summary.rs`, `tests/cli.rs` | P9, `analyze_prints_a_metrics_table_and_exits_0_on_a_flagged_file`; plant 13. **Changed tests (layout only):** `analyze_prints_surface_metrics` (reads rows instead of lines 2–4), `analyze_prints_the_nominalization_ratio` (the row instead of line 4), and summary's `renders_*`/`empty_file_has_no_nominalization_ratio` (rows instead of lines; values unchanged). `FileSummary` literals gain the two new fields | table `render`; `FileSummary.{mean_dependency_distance, passives}` | todo |
 | T8 | JSON document | `Cargo.toml`, `Cargo.lock`, `src/json.rs`, `src/lib.rs` | P8 and the schema witness against `document → Ok("{}")`; plants 14, 15 | `serde` + `serde_json`, output types, `document` | todo |
 | T9 | `--format json` for both commands | `src/main.rs`, `tests/cli.rs` | `json_is_one_document_for_all_files` (long.md + sample.md), `json_exit_codes_follow_the_command`; plants 16, 17 | `run` collects reports and prints one document | todo |

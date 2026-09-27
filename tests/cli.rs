@@ -206,21 +206,108 @@ fn check(args: &[&str], files: &[&Path]) -> (Option<i32>, String) {
 }
 
 /// Given a file with one 30-word sentence, starting on line 3, column 20
-/// When `vernier check` runs with the default limit of 25 words
+/// When `vernier check --format compact` runs with the default limit of 25 words
 /// Then it prints that sentence's position and LongSentence on stdout and exits 1
 #[test]
 fn check_flags_a_long_sentence_and_exits_1() {
     let path = fixture("long.md");
     assert_eq!(
-        check(&[], &[&path]),
+        check(&["--format", "compact"], &[&path]),
         (
             Some(1),
             format!(
-                "{}:3:20: LongSentence: sentence has 30 words (max 25)\n",
+                "{}:3:20: CognitiveOverload: LongSentence: sentence has 30 words (max 25)\n",
                 path.display()
             )
         )
     );
+}
+
+/// Given the file with one 30-word sentence
+/// When `vernier check` runs with the default `text` format
+/// Then it prints one `warning[CognitiveOverload]` diagnostic at 3:20 showing the whole line, with
+/// the words and LongSentence and the syntactic metrics absent (no parse), and exits 1
+#[test]
+fn check_prints_a_cognitive_overload_diagnostic() {
+    let path = fixture("long.md");
+    let (code, stdout) = check(&[], &[&path]);
+    assert_eq!(code, Some(1));
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(
+        lines[0],
+        "warning[CognitiveOverload]: Sentence exceeds human working-memory capacity"
+    );
+    assert_eq!(lines[1].trim(), format!("--> {}:3:20", path.display()));
+    let source_line = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .nth(2)
+        .unwrap()
+        .to_owned();
+    assert!(lines.iter().any(|l| l.ends_with(&source_line)), "{stdout}");
+    let listed: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
+    assert!(
+        listed.contains(&"- words: 30 (LongSentence, max 25)"),
+        "{stdout}"
+    );
+    assert!(
+        listed.contains(&"- mean dependency distance: absent (no parse)"),
+        "{stdout}"
+    );
+}
+
+/// Given a sentence that starts at line 1, column 15 and is hard-wrapped over three lines
+/// When `vernier check --max-sentence-len 5` runs
+/// Then the diagnostic points at 1:15, opens the underline under column 15 of line 1 and
+/// closes it on line 3
+#[test]
+fn check_underlines_a_hard_wrapped_sentence() {
+    let path = fixture("wrapped.md");
+    let (code, stdout) = check(&["--max-sentence-len", "5"], &[&path]);
+    assert_eq!(code, Some(1));
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines[1].trim(), format!("--> {}:1:15", path.display()));
+    let first = lines
+        .iter()
+        .position(|l| l.ends_with("Short opener. This sentence is"))
+        .unwrap();
+    let text_at = lines[first].len() - "Short opener. This sentence is".len();
+    let opening = lines[first + 1];
+    assert!(opening.trim_end().ends_with('^'), "{stdout}");
+    assert_eq!(opening.trim_end().len() - 1, text_at + 14, "{stdout}");
+    let last = lines
+        .iter()
+        .position(|l| l.ends_with("of the file until it ends."))
+        .unwrap();
+    let closing = lines[last + 1].trim();
+    assert!(
+        closing.starts_with("| |_") && closing.ends_with('^'),
+        "{stdout}"
+    );
+}
+
+/// Given the file with a long sentence
+/// When `vernier check` writes to a pipe, with `NO_COLOR` unset and set
+/// Then the output holds no escape codes
+#[test]
+fn check_writes_no_escape_codes_off_a_terminal() {
+    for no_color in [None, Some("1")] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_vernier"));
+        command
+            .arg("check")
+            .arg(fixture("long.md"))
+            .env_remove("NO_COLOR");
+        if let Some(value) = no_color {
+            command.env("NO_COLOR", value);
+        }
+        let out = command.output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(!out.stdout.contains(&0x1b), "{no_color:?}");
+        assert!(
+            out.stdout.starts_with(b"warning[CognitiveOverload]"),
+            "{no_color:?}"
+        );
+    }
 }
 
 /// Given the file with one 30-word sentence
@@ -242,19 +329,25 @@ fn check_compact_prints_one_line_per_flagged_sentence() {
 }
 
 /// Given the file with one 30-word sentence
-/// When `vernier check` runs with `--max-sentence-len` 29, then 30
+/// When `vernier check --format compact` runs with `--max-sentence-len` 29, then 30
 /// Then 29 flags it and exits 1, while 30 flags nothing and exits 0
 #[test]
 fn max_sentence_len_raises_the_bar() {
     let path = fixture("long.md");
-    let (code, stdout) = check(&["--max-sentence-len", "29"], &[&path]);
+    let (code, stdout) = check(
+        &["--format", "compact", "--max-sentence-len", "29"],
+        &[&path],
+    );
     assert_eq!(code, Some(1));
     assert!(
         stdout.ends_with("LongSentence: sentence has 30 words (max 29)\n"),
         "{stdout}"
     );
     assert_eq!(
-        check(&["--max-sentence-len", "30"], &[&path]),
+        check(
+            &["--format", "compact", "--max-sentence-len", "30"],
+            &[&path]
+        ),
         (Some(0), String::new())
     );
 }
@@ -271,17 +364,20 @@ fn check_on_sample_exits_0() {
 }
 
 /// Given the sample file and a limit of 10 words
-/// When `vernier check` runs
+/// When `vernier check --format compact` runs
 /// Then exactly its 13-word sentence (line 7, column 1) is flagged and it exits 1
 #[test]
 fn check_flags_the_samples_13_word_sentence_over_a_limit_of_10() {
     let path = fixture("sample.md");
     assert_eq!(
-        check(&["--max-sentence-len", "10"], &[&path]),
+        check(
+            &["--format", "compact", "--max-sentence-len", "10"],
+            &[&path]
+        ),
         (
             Some(1),
             format!(
-                "{}:7:1: LongSentence: sentence has 13 words (max 10)\n",
+                "{}:7:1: CognitiveOverload: LongSentence: sentence has 13 words (max 10)\n",
                 path.display()
             )
         )
