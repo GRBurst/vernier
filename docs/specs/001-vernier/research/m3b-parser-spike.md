@@ -9,6 +9,10 @@ Every number below cites its source.
 Numbers are copied, each under its source path, into [measurements/m3b-spike-data.md](../measurements/m3b-spike-data.md) ("data" below); a citation names that file's section, with the raw log in parentheses.
 The raw artifacts stay in `.sdd/m3b-spike/` (untracked scratch, B5); paths in `[…]` are relative to it.
 
+**Caveat (user, 2026-09-27):** the timings are a tendency, not isolated reproducible benchmarks: one laptop, `powersave` governor, load average 5–13, few rounds, no pinned CPU.
+The ratios between the routes are large enough to hold; single numbers are not.
+**Decision (user, 2026-09-27):** the ONNX route is the default parser (accuracy over speed for a non-time-critical use), against this report's recommendation; a UDPipe backend may follow (BACKLOG 10).
+
 ## TL;DR
 
 | | `udpipe` route (UDPipe 1 via `udpipe-rs` FFI, EWT model) | ONNX route (`ort` + RoBERTa goeswith model) |

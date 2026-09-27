@@ -34,7 +34,7 @@ The metric values in this example are illustrative; the criteria below, not the 
 **Non-Goals:**
 
 - THE tool SHALL NOT analyze languages other than English in this spec.
-- THE tool SHALL NOT bundle a parser model in the binary or the repository (license open, see M3b).
+- THE tool SHALL NOT bundle a parser model in the binary or the repository (the user supplies it; license in M3b).
 - THE tool SHALL NOT rewrite the user's text; suggestions are fixed advice per rule, never generated sentences.
 - THE tool SHALL NOT read a configuration file in this spec; thresholds come from flags only.
 - THE tool SHALL NOT download a parser model in this spec; a model reaches the tool only through `--model-path`.
@@ -44,6 +44,7 @@ The metric values in this example are illustrative; the criteria below, not the 
 - Drafted from the user's project description of 2026-09-26 ("Project Specification: Standalone Markdown Cognitive Readability & Syntactic Complexity Analyzer in Rust").
 - Decided by the user on 2026-09-26: the center-embedding distance counts the words strictly between subject and verb (the example's "9" became 8); the parser choice (udpipe vs ONNX via `ort`) stays open until a spike at the start of M3b; the model license is checked before M3b and no model is bundled.
 - Clarified by the user on 2026-09-26 (evidence: [open-questions report](2026-09-26-vernier-open-questions-answered.md), [research/](research/)): suggestions are fixed advice per rule; vernier is for personal, non-commercial use, so the CC BY-NC-SA 4.0 UDPipe 1 English model is acceptable when the user supplies it; no downloader; the parser route is still chosen by the M3b spike. The other ten markers were answered by research and accepted by the user.
+- Decided by the user on 2026-09-27 (evidence: [research/m3b-parser-spike.md](research/m3b-parser-spike.md)): the ONNX route (`ort` with the RoBERTa goeswith UD model) is the default parser, because the user's use is not time-critical and prefers accuracy (UAS 94.8 % against 83.0 % for UDPipe 1, and it parses the M3a example right); the spike's timings are a tendency, not isolated reproducible benchmarks; a user-selectable backend (UDPipe 1, or different models per metric) is a follow-up, and when UDPipe comes its example test accepts the GUM or ParTUT model and the README warns that EWT parses the example wrong.
 - Clarified in place while planning M5 on 2026-09-27 (spec `Draft`; evidence: [research/m5-rendering-spike.md](research/m5-rendering-spike.md), [plan-M5.md](plan-M5.md#spec-clarifications-t0-in-place-spec-draft)): which metrics a diagnostic lists, compact's code and message, JSON for both commands, `analyze`'s table under M1's line, positions equal across formats, the example's location, and the renderer and JSON crates.
 
 ## Definitions
@@ -123,8 +124,8 @@ Put a real Universal Dependencies parser behind the `Parser` trait, after a shor
 
 **Acceptance Criteria:**
 
-- [ ] BEFORE any parser code lands, THE milestone SHALL commit a spike report comparing the `udpipe` route and the ONNX-via-`ort` route on build inside devenv, binary size, per-sentence time on a committed sample, and output on the M3a example sentence; the user chooses the route from that report.
-- [ ] BEFORE model download or loading code lands, THE milestone SHALL record the license of the chosen model in the README and in this spec; the tool SHALL load it only where that license permits the user's intended use (personal, non-commercial; the UDPipe 1 English EWT model is CC BY-NC-SA 4.0), and SHALL never redistribute it.
+- [x] BEFORE any parser code lands, THE milestone SHALL commit a spike report comparing the `udpipe` route and the ONNX-via-`ort` route on build inside devenv, binary size, per-sentence time on a committed sample, and output on the M3a example sentence; the user chooses the route from that report (chosen 2026-09-27: ONNX via `ort`; see Provenance).
+- [ ] BEFORE model download or loading code lands, THE milestone SHALL record the license of the chosen model in the README and in this spec; the tool SHALL load it only where that license permits the user's intended use (personal, non-commercial), and SHALL never redistribute it. The chosen model, `ghotriw/roberta-base-english-ud-goeswith-onnx` (ONNX export of `KoichiYasuoka/roberta-base-english-ud-goeswith`), is declared MIT, but it is trained on UD English EWT and Atis (CC BY-SA 4.0) and on GUM, ParTUT and LinES (CC BY-NC-SA 4.0), so vernier treats it as non-commercial ([research/licenses.md](research/licenses.md)).
 - [ ] WHEN `--model-path` names a readable model, THE tool SHALL parse each sentence and compute the M3a metrics from the result.
 - [ ] WHEN the parsed M3a example sentence is analyzed, THE tool SHALL report center-embedding with subject "proposal" and verb "caused" (integration test, skipped with a printed reason when no model is present).
 - [ ] WHEN no `--model-path` is given, THE tool SHALL compute the surface metrics, print one notice on stderr that the syntactic metrics were skipped, and judge the exit code on surface rules only.
@@ -137,7 +138,7 @@ Count nominalizations (nouns derived from verbs or adjectives) and passive const
 
 **Acceptance Criteria:**
 
-- [x] THE engine SHALL count as a nominalization a word whose lower-cased lemma ends in `-tion`, `-sion`, `-ment`, `-ance`, `-ence` or `-ity`, is at least 7 letters long, and is not on the committed stoplist `data/nominalization-stoplist.txt` (seeded from pybiber, MIT, keeping its notice). Without a parse, the candidates are the sentence's words and a word's lemma is the word with a trailing possessive `'s`, `’s`, `'` or `’` removed, then a plural `-ies` read as `-y`, or else one final `-s` removed unless it follows another `s`; with a parse, the candidates are the tokens tagged `NOUN`, with the parser's lemma.
+- [x] THE engine SHALL count as a nominalization a word whose lower-cased lemma ends in `-tion`, `-sion`, `-ment`, `-ance`, `-ence` or `-ity`, is at least 7 letters long, and is not on the committed stoplist `data/nominalization-stoplist.txt` (seeded from pybiber, MIT, keeping its notice). Without a parse, the candidates are the sentence's words and a word's lemma is the word with a trailing possessive `'s`, `’s`, `'` or `’` removed, then a plural `-ies` read as `-y`, or else one final `-s` removed unless it follows another `s`; with a parse, the candidates are the tokens tagged `NOUN`, with the parser's lemma, or, where the parser gives none (`_`, as the ONNX model does), the surface lemma of the token's form.
 - [x] THE engine SHALL report per sentence and per file the nominalization ratio = nominalizations / words, the words counted as in M2 (with or without a parse); a file without words has no ratio.
 - [x] WHEN a parse contains a token with `deprel` `aux:pass`, THE engine SHALL report its head verb as a passive construction (once per head) with its position: the first character of the verb's form, found by matching the token forms in order against the sentence text, or the sentence's first character when a form is not found.
 - [x] WHEN no parse exists, THE engine SHALL report passive voice as absent, not as zero.

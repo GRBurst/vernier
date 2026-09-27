@@ -21,9 +21,12 @@ How work happens here: `AGENTS.md` → `docs/PROCESS.md`.
 
 ## Parser model license
 
-No model is bundled. The UDPipe Universal Dependencies models are CC BY-NC-SA 4.0 (non-commercial; verified,
-`docs/specs/001-vernier/research/licenses.md`). Syntactic metrics (spec 001 M3b) need such a model, passed with
-`--model-path`; without one, vernier reports surface metrics only.
+No model is bundled or downloaded. Syntactic metrics (spec 001 M3b) need the ONNX Universal Dependencies model
+`ghotriw/roberta-base-english-ud-goeswith-onnx` (an export of `KoichiYasuoka/roberta-base-english-ud-goeswith`), passed
+with `--model-path`; without one, vernier reports surface metrics only. The model is declared MIT, but it is trained on
+UD English EWT and Atis (CC BY-SA 4.0) and on GUM, ParTUT and LinES (CC BY-NC-SA 4.0), so treat it as usable for
+personal, non-commercial work only (`docs/specs/001-vernier/research/licenses.md`). vernier never redistributes it.
+(The UDPipe 1 models, a possible later backend, are CC BY-NC-SA 4.0.)
 
 The syllable counter's reference list is sampled from CMUdict (BSD-style; notice in
 `docs/specs/001-vernier/measurements/CMUDICT-LICENSE`).
