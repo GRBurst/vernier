@@ -311,11 +311,11 @@ mod tests {
         /// Then it is not a nominalization
         #[test]
         fn short_lemmas_are_not_nominalizations(
-            stem in "[a-z]{0,6}",
-            suffix in prop::sample::select(SPEC_SUFFIXES.to_vec()),
+            (stem, suffix) in prop::sample::select(SPEC_SUFFIXES.to_vec())
+                .prop_flat_map(|suffix| (prop::collection::vec(prop::char::range('a', 'z'), 0..7 - suffix.len()), Just(suffix))),
         ) {
-            let lemma = format!("{stem}{suffix}");
-            prop_assume!(lemma.chars().count() < 7);
+            let lemma = format!("{}{suffix}", stem.iter().collect::<String>());
+            prop_assert!(lemma.chars().count() < 7, "{}", lemma);
             prop_assert!(!is_nominalization(&lemma, &Stoplist::committed()), "{}", lemma);
         }
 

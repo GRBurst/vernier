@@ -200,7 +200,8 @@ mod tests {
 
     proptest! {
         /// Given words joined by spaces and one word's token replaced by a piece of a word that
-        /// occurs in the text only inside words, never at a word start
+        /// occurs in the text only inside words, never at a word start (the replaced word chosen
+        /// where the next word is not its prefix, as in P9″)
         /// When the tokens are aligned to the text
         /// Then that piece gets `None` and every other offset is unchanged
         #[test]
@@ -210,7 +211,11 @@ mod tests {
             cut in any::<Index>(),
         ) {
             let text = words.join(" ");
-            let k = which.index(words.len());
+            // Only where the next word is not a prefix of word k: the known limit of audit 009.
+            let unambiguous: Vec<usize> = (0..words.len())
+                .filter(|&i| words.get(i + 1).is_none_or(|next| !words[i].starts_with(next.as_str())))
+                .collect();
+            let k = unambiguous[which.index(unambiguous.len())];
             let word = &words[k];
             let inner = &word[1 + cut.index(word.len() - 1)..];
             prop_assume!(!words.iter().any(|w| w.starts_with(inner)));

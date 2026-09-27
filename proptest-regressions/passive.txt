@@ -7,3 +7,4 @@
 cc 785869189d95627374c8ee40b4b69b0aa8ebf0edb2b49a70863763262da0f11b # shrinks to words = [("a", 1)], insert = None
 cc ee58a744fbd35c60338504c09082a3718631bfef5fde32f182e001c2914fe314 # shrinks to tokens = [Token { id: 1, form: "w", lemma: "w", upostag: "X", head: 1, deprel: "aux:pass" }]
 cc 3d80a986c9916f50b840afed05a0e057fa785bff3be4fec17259c6a78a7143ec # shrinks to words = [("'", 1), ("'", 1)], edit = Substitute(Index(0))
+cc cab930231f77273b56173a85e39b1f285085d7d3f64649f02aabb935116f82d1 # shrinks to words = ["od", "od"], which = Index(0), cut = Index(0)
