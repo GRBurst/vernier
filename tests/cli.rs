@@ -1,4 +1,4 @@
-//! End-to-end checks of the `vernier` binary (spec 001 M1, M2).
+//! End-to-end checks of the `vernier` binary (spec 001 M1, M2, M4, M5).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -448,4 +448,72 @@ fn an_unreadable_file_wins_over_a_flag() {
     let (code, stdout) = check(&[], &[&fixture("long.md"), &missing()]);
     assert_eq!(code, Some(2));
     assert!(stdout.contains("LongSentence"), "{stdout}");
+}
+
+/// Runs `vernier` and parses its stdout as one JSON document.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn json(args: &[&str], files: &[&Path]) -> (Option<i32>, serde_json::Value) {
+    let out = vernier(args, files);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    (out.status.code(), serde_json::from_str(&stdout).unwrap())
+}
+
+/// Given the long-sentence file and the sample file
+/// When `vernier check --format json` runs on both
+/// Then stdout is one document listing both files in order, the long sentence's diagnostic at
+/// the position compact prints, the sample without diagnostics, and it exits 1
+#[test]
+fn json_is_one_document_for_all_files() {
+    let (long, sample) = (fixture("long.md"), fixture("sample.md"));
+    let (code, value) = json(&["check", "--format", "json"], &[&long, &sample]);
+    assert_eq!(code, Some(1));
+    assert_eq!(value["schema_version"], 1);
+    let files = value["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0]["path"], long.display().to_string());
+    assert_eq!(files[1]["path"], sample.display().to_string());
+    let d = &files[0]["diagnostics"][0];
+    let (_, compact) = check(&["--format", "compact"], &[&long]);
+    let position = format!("{}:{}:{}:", long.display(), d["line"], d["column"]);
+    assert!(compact.starts_with(&position), "{compact} vs {position}");
+    assert_eq!(
+        files[1]["diagnostics"],
+        serde_json::Value::Array(Vec::new())
+    );
+    assert_eq!(files[1]["metrics"]["sentences"], 4);
+}
+
+/// Given the long-sentence file, the sample file and a missing file
+/// When `analyze` and `check` run with `--format json`
+/// Then analyze exits 0 even with a diagnostic, check exits 1 on the long file and 0 on the
+/// sample, and a missing file makes it exit 2 while the document lists the readable files
+#[test]
+fn json_exit_codes_follow_the_command() {
+    let (long, sample, gone) = (fixture("long.md"), fixture("sample.md"), missing());
+    let (code, value) = json(&["analyze", "--format", "json"], &[&long]);
+    assert_eq!(code, Some(0));
+    assert_eq!(
+        value["files"][0]["diagnostics"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(json(&["check", "--format", "json"], &[&sample]).0, Some(0));
+    assert_eq!(json(&["check", "--format", "json"], &[&long]).0, Some(1));
+    let (code, value) = json(&["check", "--format", "json"], &[&long, &gone]);
+    assert_eq!(code, Some(2));
+    assert_eq!(value["files"].as_array().map(Vec::len), Some(1));
+}
+
+/// Given the sample file
+/// When `vernier analyze` runs with `--format compact`
+/// Then it prints the same table as the text format
+#[test]
+fn analyze_prints_the_table_in_compact_too() {
+    let path = fixture("sample.md");
+    let text = vernier(&["analyze"], &[&path]).stdout;
+    let compact = vernier(&["analyze", "--format", "compact"], &[&path]).stdout;
+    assert_eq!(
+        String::from_utf8(compact).unwrap(),
+        String::from_utf8(text).unwrap()
+    );
 }
