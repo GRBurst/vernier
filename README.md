@@ -1,10 +1,10 @@
 # vernier
 
 Readability and syntactic-complexity analyzer for Markdown, written in Rust.
-Status: spec 001 is a draft. M1 (prose extraction) and M2 (sentences, syllables, Flesch Reading Ease, Flesch-Kincaid Grade, Gunning Fog, `check` flags `LongSentence`) are implemented. M3a (mean dependency distance, tree depth, clause count and center-embedding, computed from a UD parse; no parser is wired to the command line until M3b) is implemented too. See `docs/HANDOVER.md`.
+Status: spec 001 is a draft. M1 (prose extraction) and M2 (sentences, syllables, Flesch Reading Ease, Flesch-Kincaid Grade, Gunning Fog, `check` flags `LongSentence`) are implemented. M3a (mean dependency distance, tree depth, clause count and center-embedding, computed from a UD parse; no parser is wired to the command line until M3b) is implemented too, and so is M4 (nominalization ratio; passive voice from a parse, reported absent without one). See `docs/HANDOVER.md`.
 
 ```sh
-vernier analyze README.md          # per file: spans, words, sentences, syllables, scores
+vernier analyze README.md          # per file: spans, words, sentences, syllables, scores, nominalization ratio
 vernier check README.md            # path:line:col: LongSentence: …; exit 1 if any flag, 2 if a file is unreadable
 ```
 
@@ -23,3 +23,6 @@ No model is bundled. The UDPipe Universal Dependencies models are CC BY-NC-SA 4.
 
 The syllable counter's reference list is sampled from CMUdict (BSD-style; notice in
 `docs/specs/001-vernier/measurements/CMUDICT-LICENSE`).
+
+The nominalization stoplist `data/nominalization-stoplist.txt` is seeded from pybiber (MIT; notice in
+`data/nominalization-stoplist.PYBIBER-LICENSE`).

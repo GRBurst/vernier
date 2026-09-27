@@ -2,9 +2,9 @@
 
 ## 1. Preconditions verified
 
-- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 140 tests (126 lib unit, 3 bin, 11 integration) after follow-up F1.
+- 2026-09-27, `export CARGO_HOME=$DEVENV_STATE/cargo` (audit 002): `just verify` printed `✓ all gates green`, with 171 tests (156 lib unit, 3 bin, 12 integration) after M4.
 - `PROPTEST_CASES=3000 cargo test --lib` passed.
-- Every planted violation in `docs/specs/001-vernier/plan-M3a.md` was seen to fail (12/12, with the proptest seeds moved aside), then reverted; so was every F1 plant in `plan-M2.md` (7/7).
+- Every planted violation in `docs/specs/001-vernier/plan-M3a.md` was seen to fail (12/12, with the proptest seeds moved aside), then reverted; so was every F1 plant in `plan-M2.md` (7/7) and every M4 plant in `plan-M4.md` (1–13, plus 7″).
 - Nested `devenv shell -- …` fails in the agent sandbox. Commits are unsigned (D13) and the pre-commit hook runs `just verify`.
 
 ## 2. What changed
@@ -31,6 +31,15 @@
   - `src/analysis.rs`: `SyntacticFlag` (carries its value), `syntactic_flags`, `analyze_parsed(.., &impl Parser)`; `analyze` unchanged. `main.rs` renders the four messages (unit-tested only; no CLI path has a parser until M3b). `--max-tree-depth` help says edges.
   - The example parse is UDPipe 2's real output (LINDAT, `english-ewt-ud-2.17`): MDD 32/12 ≈ 2.67 (so `HighMdd` is not raised at 3.0), depth 4, 1 clause, center-embedding proposal/caused/8.
 - **Follow-up F1, block prose across inline markup** (audit 006, plan-M2 section F1, commits 33d9158..4f05aaa): spans are joined directly when only emphasis/strong/strikethrough/super-/subscript/link delimiters lie between them, otherwise with one space (`ProseSpan::joins_previous`, set by `extract_blocks`). `**The proposal**, which` now reaches sentences as `The proposal, which`; `un*believ*able` is one word, also on M1's word line (`summarize` counts words on block text). Changed test: `analysis::parses_the_prose_not_the_markup` now keys on `EXAMPLE_TEXT` (it was keyed on the buggy text).
+- **M4 IMPLEMENTED** (plan `docs/specs/001-vernier/plan-M4.md`, commits c04738a..f6659be):
+  - `data/nominalization-stoplist.txt` (pybiber seed + research false positives) and its MIT notice.
+  - `src/nominalization.rs`: `Stoplist::committed()`, `surface_lemma` (possessive, then `-ies`→`-y` or one final `-s`), `is_nominalization`, surface/parsed counts, the `NominalizationCount` monoid (`ratio()` is `None` without words).
+  - `src/passive.rs`: `passive_heads`, `align` (forms in order; at the cursor, else at the next word start; a miss costs one position).
+  - `analysis.rs`: `SentenceAnalysis.nominalizations` is the effective count (surface words without a parse, `NOUN` lemmas with one); `SentenceSyntax.passives`; `FileAnalysis.passives` is `None` without a parse. `summary` prints a fourth line: `nominalization ratio 0.286 (4 of 14 words), passive voice absent (no parse)`.
+  - Spec fixed in place: the `-ies` lemma (audit 007) and possessives (audit 008). Plan fixed: alignment after a substituted form (audit 009, with a documented one-offset limit).
+  - Changed tests (layout only): `tests/cli.rs analyze_prints_surface_metrics` expects 8 lines with a stride of 4; summary's two full-render witnesses gain line 4; M3a P14's parse-only eraser also resets `passives`.
+  - A by-hand run gave README 5/117, spec 46/2107. Candidate stoplist additions for later: `segment`, maybe `distance`, `evidence`, `density`, `reference`.
+- The git history was rebased on 2026-09-27 09:14, outside the agent. The content is identical (`git range-diff` shows `=`), and the hashes changed. The hashes above are the current ones.
 - A changed M1 test: `check … --max-sentence-len 10` on sample.md now exits 1 (sample.md has a 13-word sentence). The old test passes 30, and a new test asserts the flag at 10.
 
 ## 3. How to check
@@ -45,15 +54,18 @@ cargo run -q -- analyze tests/fixtures/sample.md
 cargo run -q -- check tests/fixtures/long.md; echo $?
 # tests/fixtures/long.md:3:20: LongSentence: sentence has 30 words (max 25)
 # 1
+cargo run -q -- analyze tests/fixtures/nominal.md | tail -1
+#   nominalization ratio 0.286 (4 of 14 words), passive voice absent (no parse)
 ```
 
 ## Open tasks
 
 - Phase 2 for spec 001 is owed (BACKLOG item 2).
-- User review of M1, M2 and M3a → `DONE`. By hand:
+- User review of M1, M2, M3a and M4 → `DONE`. By hand:
   - skim the miss list in `measurements/syllables.md`;
   - run `vernier check` on one of your own Markdown files and skim the flagged positions. `check README.md docs/specs/001-vernier/spec.md` flags 28 sentences; they looked right on a spot check.
 - M3a decisions to confirm (plan-M3a "Decisions made"): a content token with only `PUNCT` ancestors becomes a projected root; `words_between` counts tokens whose form has a letter or digit; the subject's head is not required to be a `VERB`.
+- M4 candidate stoplist additions (see above); decide on real prose, not by guess.
 - M3b parser choice (UDPipe via FFI needs an ADR for `unsafe`, D9), to be decided before M3b.
 
 ## Next action

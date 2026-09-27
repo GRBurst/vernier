@@ -129,17 +129,17 @@ Put a real Universal Dependencies parser behind the `Parser` trait, after a shor
 - [ ] WHEN no `--model-path` is given, THE tool SHALL compute the surface metrics, print one notice on stderr that the syntactic metrics were skipped, and judge the exit code on surface rules only.
 - [ ] WHEN `--model-path` names a missing or unusable model, THE tool SHALL name it on stderr and exit 2.
 
-## M4 — Nominalization and passive voice (Status: PLANNED)
+## M4 — Nominalization and passive voice (Status: IMPLEMENTED)
 <a id="M4"></a>
 
 Count nominalizations (nouns derived from verbs or adjectives) and passive constructions.
 
 **Acceptance Criteria:**
 
-- [ ] THE engine SHALL count as a nominalization a word whose lower-cased lemma ends in `-tion`, `-sion`, `-ment`, `-ance`, `-ence` or `-ity`, is at least 7 letters long, and is not on the committed stoplist `data/nominalization-stoplist.txt` (seeded from pybiber, MIT, keeping its notice). Without a parse, the candidates are the sentence's words and a word's lemma is the word with a trailing possessive `'s`, `’s`, `'` or `’` removed, then a plural `-ies` read as `-y`, or else one final `-s` removed unless it follows another `s`; with a parse, the candidates are the tokens tagged `NOUN`, with the parser's lemma.
-- [ ] THE engine SHALL report per sentence and per file the nominalization ratio = nominalizations / words, the words counted as in M2 (with or without a parse); a file without words has no ratio.
-- [ ] WHEN a parse contains a token with `deprel` `aux:pass`, THE engine SHALL report its head verb as a passive construction (once per head) with its position: the first character of the verb's form, found by matching the token forms in order against the sentence text, or the sentence's first character when a form is not found.
-- [ ] WHEN no parse exists, THE engine SHALL report passive voice as absent, not as zero.
+- [x] THE engine SHALL count as a nominalization a word whose lower-cased lemma ends in `-tion`, `-sion`, `-ment`, `-ance`, `-ence` or `-ity`, is at least 7 letters long, and is not on the committed stoplist `data/nominalization-stoplist.txt` (seeded from pybiber, MIT, keeping its notice). Without a parse, the candidates are the sentence's words and a word's lemma is the word with a trailing possessive `'s`, `’s`, `'` or `’` removed, then a plural `-ies` read as `-y`, or else one final `-s` removed unless it follows another `s`; with a parse, the candidates are the tokens tagged `NOUN`, with the parser's lemma.
+- [x] THE engine SHALL report per sentence and per file the nominalization ratio = nominalizations / words, the words counted as in M2 (with or without a parse); a file without words has no ratio.
+- [x] WHEN a parse contains a token with `deprel` `aux:pass`, THE engine SHALL report its head verb as a passive construction (once per head) with its position: the first character of the verb's form, found by matching the token forms in order against the sentence text, or the sentence's first character when a form is not found.
+- [x] WHEN no parse exists, THE engine SHALL report passive voice as absent, not as zero.
 
 ## M5 — Diagnostics, check mode and CI output (Status: PLANNED)
 <a id="M5"></a>
