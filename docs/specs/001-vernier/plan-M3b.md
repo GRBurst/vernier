@@ -268,9 +268,17 @@ Split point if the session runs short: M3b.1 = T0–T5 (pure core, lands green w
 | T6 | ONNX shell | `Cargo.toml`, `Cargo.lock`, `src/onnx.rs`, `src/lib.rs` | `onnx` unit load errors (missing dir, missing `tokenizer.json`, bad `config.json`) against `load → Err(MissingFile(dir))` for all; with `VERNIER_TEST_MODEL`: `parses_the_example_into_a_tree` | `ort` + `tokenizers`, `OnnxParser` | done |
 | T7 | CLI wiring | `src/main.rs`, `src/summary.rs`, `tests/cli.rs` | P14; `no_model_prints_one_notice_and_keeps_stdout`, `a_missing_model_is_named_and_exits_2` (text/compact/json), `a_model_without_its_tokenizer_is_named_and_exits_2`, `an_unloadable_runtime_is_named_and_exits_2`; plants 13–17. **Changed test:** `check_accepts_every_m5_flag_and_passes_without_rules` drops `--model-path none.udpipe` (reason in the decisions table) | load once, notices, `with_parse`, exit 2 mapping | done |
 | T8 | model-backed integration tests | `tests/model.rs` | `check_reports_the_examples_center_embedding`, `analyze_json_fills_the_parse_metrics`; T7's wiring precedes them, so their RED is plant 18, seen with the model; without it they print `skipped: …` | — | done |
-| T9 | by-hand checks B1–B4, measured times | this plan (*Measured*) | — | — | todo |
+| T9 | by-hand checks B1–B4, measured times | this plan (*Measured*) | — | — | done |
 | T10 | close-out (main) | `spec.md` (ticks M3b 2–6, Status), `README.md` (model dir layout, `ORT_DYLIB_PATH`, runtime ≥ 1.17, notices), `docs/HANDOVER.md`, this plan (ticks) | `just verify`; every plant seen red; B1–B4 | — | todo |
 
 ## Measured
 
-(T9; filled after the by-hand runs.)
+By hand on 2026-09-28, in the sandbox (16 logical cores), ONNX Runtime 1.27.1 from nix (`ORT_DYLIB_PATH`), model `.sdd/m3b-spike/models/rbeg-onnx`, `cargo build --release --offline`.
+
+| Check | Result |
+| :--- | :--- |
+| B1 parity | scratch crate `.sdd/m3b-impl/parity` (`OnnxParser` on `.sdd/m3b-spike/sentences.txt`) against the spike's `out-onnx.conllu`: 50 of 50 sentences, 973 tokens, 0 differences in FORM, UPOS, HEAD or DEPREL |
+| B2 chunking | the same crate built with `CHUNK_ROWS` = 100,000 (every sentence in one batch): output byte-identical to B1 (40 s chunked, 37 s unchunked for the 50 sentences) |
+| B3 `sample.md` | `vernier check --format compact --model-path M tests/fixtures/sample.md`: 2.08–2.28 s wall, 11–14 s user, 694–698 MB peak RSS (3 runs); prints `tests/fixtures/sample.md:7:1: CognitiveOverload: CenterEmbedding: subject "proposal" separated from verb "caused" by 8 words`, exit 1 |
+| B3 `parser-sample.md` | the same on `measurements/parser-sample.md` (964 words): 39.2–43.8 s wall, 548–598 s user, 771–830 MB peak RSS (3 runs), exit 1. Without `--model-path`: 0.00 s. The spike measured 28.7–29.2 s + 1.3–1.9 s load for its 50 sentences (per-sentence medians); performance is BACKLOG 6, not a gate |
+| B4 too long | a 612-word file whose second sentence has 608 pieces: stderr `vernier: .sdd/m3b-impl/long.md:5:1: sentence too long for the model (608 subword pieces, max 509); syntactic metrics skipped`; `check` text shows its four syntactic lines as `absent (too long for the model)`; `analyze` gives the file MDD of the short sentence (1.00); exit 1 (length flag), 1.7 s wall |
