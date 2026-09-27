@@ -9,6 +9,7 @@ pub mod cli;
 pub mod dependency;
 pub mod diagnostic;
 pub mod json;
+pub mod mst;
 pub mod nominalization;
 pub mod passive;
 pub mod position;

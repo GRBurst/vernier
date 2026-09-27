@@ -140,8 +140,8 @@ Each names the input where the mutant differs (audit 005).
 
 | # | Plant | Must fail (input) | Seen |
 | :--- | :--- | :--- | :--- |
-| 1 | CLE returns the greedy argmax without contraction | P1 on any matrix with a greedy cycle (the cycle witness `[1, 0, 2]` is not a forest) | [ ] |
-| 2 | contraction picks the cycle node by `argmin` instead of `argmax` when expanding the entering arc | P2 on the generator's cyclic cases (score below brute force) | [ ] |
+| 1 | CLE returns the greedy argmax without contraction | P1 on any matrix with a greedy cycle (the cycle witness `[1, 0, 2]` is not a forest) || [x] |
+| 2 | contraction picks the cycle node by `argmin` instead of `argmax` when expanding the entering arc | P2 on the generator's cyclic cases (score below brute force) || [x] |
 | 3 | `masked_batch` puts `<mask>` at position `i` instead of `i + 1` (overwrites `<s>` on row 1) | P5 on any n ≥ 1 | [ ] |
 | 4 | `fits` uses `n + 2` | P6 at `n = max − 2` (`fits(510, 512)` true); the "too long" witness | [ ] |
 | 5 | root labels allowed off the diagonal (mask `kind` ignored for roots) | P9 (a non-root token with a `…|root` label, logits biased toward root labels) | [ ] |
@@ -251,7 +251,7 @@ Split point if the session runs short: M3b.1 = T0–T5 (pure core, lands green w
 | T1 | refactor: `Option<SentenceSyntax>` → `Syntax { Unparsed, Parsed }` | `src/analysis.rs`, `src/diagnostic.rs` | — (refactor). Evidence: every existing test green before and after with unchanged assertions (`None` → `Syntax::Unparsed`, `Some(x)` → `Syntax::Parsed(x)` in literals and matches) | the enum, `Syntax::parsed()` | done |
 | T2 | the seam: `&mut self`, `Parse::TooLong`, `Syntax::TooLong`, parse-error position | `src/dependency.rs`, `src/analysis.rs`, `src/diagnostic.rs` | P12 with a `TooLongParser`, `a_too_long_sentence_reads_absent_too_long_for_the_model`, `a_parse_error_names_the_sentence_start`; plants 10, 11. **Changed test code (not assertions):** the test parsers implement `parse(&mut self)` and wrap tokens in `Parse::Tokens` | trait, enums, `analyze_parsed(&mut P)` | done |
 | T3 | M4 lemma fallback | `src/nominalization.rs` | P13 against today's code (a `_`-lemma `NOUN` `deliberation` counts 0); plant 12 | `_` → `surface_lemma(form)` | done |
-| T4 | Chu-Liu/Edmonds | `src/mst.rs`, `src/lib.rs` | P1–P4 and the cycle witness against `chu_liu_edmonds → greedy`; plants 1, 2 | port of the spike's `chu_liu_edmonds`, split | todo |
+| T4 | Chu-Liu/Edmonds | `src/mst.rs`, `src/lib.rs` | P1–P4 and the cycle witness against `chu_liu_edmonds → greedy`; plants 1, 2 | port of the spike's `chu_liu_edmonds`, split | done |
 | T5 | decoder | `src/decoder.rs`, `src/lib.rs`, `Cargo.toml` (none if `serde_json` suffices) | P5–P11, label/merge/too-long witnesses against `decode → Err(Empty)`; plants 3–9 | `Labels`, `fits`, `masked_batch`, `decode` | todo |
 | T6 | ONNX shell | `Cargo.toml`, `Cargo.lock`, `src/onnx.rs`, `src/lib.rs` | `onnx` unit load errors (missing dir, missing `tokenizer.json`, bad `config.json`) against `load → Err(MissingFile(dir))` for all; with `VERNIER_TEST_MODEL`: `parses_the_example_into_a_tree` | `ort` + `tokenizers`, `OnnxParser` | todo |
 | T7 | CLI wiring | `src/main.rs`, `src/summary.rs`, `tests/cli.rs` | P14; `no_model_prints_one_notice_and_keeps_stdout`, `a_missing_model_is_named_and_exits_2` (text/compact/json), `a_model_without_its_tokenizer_is_named_and_exits_2`, `an_unloadable_runtime_is_named_and_exits_2`; plants 13–17. **Changed test:** `check_accepts_every_m5_flag_and_passes_without_rules` drops `--model-path none.udpipe` (reason in the decisions table) | load once, notices, `with_parse`, exit 2 mapping | todo |
