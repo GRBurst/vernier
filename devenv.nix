@@ -12,9 +12,11 @@
     git
     just
     python3 # tools/spec-check (stdlib only)
-    # For spec 001 M3b, only if the udpipe route wins the parser spike:
-    # clang / stdenv.cc and pkg-config
+    onnxruntime # spec 001 M3b: loaded at run time by `ort` (load-dynamic), ADR 0001
   ];
+
+  # The ONNX Runtime vernier loads when --model-path is given (ADR 0001).
+  env.ORT_DYLIB_PATH = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
 
   git-hooks.hooks = {
     verify = {
