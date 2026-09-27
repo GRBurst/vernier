@@ -6,10 +6,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Parser;
-use vernier::analysis::{self, FileAnalysis, Thresholds};
-use vernier::cli::{Args, Cli, Command};
-use vernier::diagnostic;
-use vernier::position::PositionError;
+use vernier::analysis::{self, Thresholds};
+use vernier::cli::{Args, Cli, Command, OutputFormat};
+use vernier::diagnostic::{self, Diagnostic};
 use vernier::prose::SourceFormat;
 use vernier::summary::{render, summarize};
 
@@ -72,8 +71,8 @@ fn analyze(_args: &Args, path: &Path, source: &str) -> FileOutcome {
     FileOutcome::Clean
 }
 
-/// Prints one `path:line:col: Flag: message` line per flag; `--format` is accepted and ignored
-/// until M5 renders it.
+/// Prints the diagnostics of one file in the chosen format; `json` prints per-flag lines until
+/// M5 renders it.
 fn check(args: &Args, path: &Path, source: &str) -> FileOutcome {
     let thresholds = Thresholds {
         max_sentence_len: args.max_sentence_len,
@@ -82,10 +81,12 @@ fn check(args: &Args, path: &Path, source: &str) -> FileOutcome {
         max_clauses: args.max_clauses,
     };
     let analysis = analysis::analyze(source, SourceFormat::from_path(path), &thresholds);
-    match diagnostics(path, source, &analysis, &thresholds) {
-        Ok(lines) if lines.is_empty() => FileOutcome::Clean,
-        Ok(lines) => {
-            lines.iter().for_each(|line| println!("{line}"));
+    match diagnostic::diagnostics(source, &analysis, &thresholds) {
+        Ok(found) if found.is_empty() => FileOutcome::Clean,
+        Ok(found) => {
+            rendered(args.format, path, &found)
+                .iter()
+                .for_each(|line| println!("{line}"));
             FileOutcome::Flagged
         }
         Err(err) => {
@@ -98,34 +99,34 @@ fn check(args: &Args, path: &Path, source: &str) -> FileOutcome {
     }
 }
 
-/// One line per flag of every flagged sentence, at the position of the sentence's first
-/// character: each sentence's surface flags, then its syntactic flags.
-fn diagnostics(
-    path: &Path,
-    source: &str,
-    analysis: &FileAnalysis,
-    thresholds: &Thresholds,
-) -> Result<Vec<String>, PositionError> {
-    let found = diagnostic::diagnostics(source, analysis, thresholds)?;
-    Ok(found
+/// The lines `check` prints for the diagnostics of one file.
+fn rendered(format: OutputFormat, path: &Path, found: &[Diagnostic]) -> Vec<String> {
+    let path = path.display().to_string();
+    match format {
+        OutputFormat::Compact => found
+            .iter()
+            .map(|d| diagnostic::render_compact(&path, d))
+            .collect(),
+        OutputFormat::Text | OutputFormat::Json => per_flag_lines(&path, found),
+    }
+}
+
+/// One line per flag of every diagnostic, at the position of its sentence's first character.
+fn per_flag_lines(path: &str, found: &[Diagnostic]) -> Vec<String> {
+    found
         .iter()
         .flat_map(|d| {
-            d.flags.iter().map(move |flag| {
-                format!(
-                    "{}:{}:{}: {flag}",
-                    path.display(),
-                    d.start.line(),
-                    d.start.column()
-                )
-            })
+            d.flags
+                .iter()
+                .map(move |flag| format!("{path}:{}:{}: {flag}", d.start.line(), d.start.column()))
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vernier::analysis::{Flag, SentenceAnalysis, SyntacticFlag};
+    use vernier::analysis::{FileAnalysis, Flag, SentenceAnalysis, SyntacticFlag};
 
     const THRESHOLDS: Thresholds = Thresholds {
         max_sentence_len: 25,
@@ -188,7 +189,8 @@ mod tests {
             nominalizations: vernier::nominalization::NominalizationCount::default(),
             passives: None,
         };
-        let lines = diagnostics(Path::new("f.md"), source, &analysis, &THRESHOLDS).unwrap();
+        let found = diagnostic::diagnostics(source, &analysis, &THRESHOLDS).unwrap();
+        let lines = per_flag_lines("f.md", &found);
         assert_eq!(
             lines,
             [

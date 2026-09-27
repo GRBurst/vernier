@@ -55,6 +55,17 @@ impl fmt::Display for FlagMessage {
     }
 }
 
+/// `path:line:col: CognitiveOverload: message`, the message joining the flag messages with `; `.
+pub fn render_compact(path: &str, diagnostic: &Diagnostic) -> String {
+    let messages: Vec<String> = diagnostic.flags.iter().map(ToString::to_string).collect();
+    format!(
+        "{path}:{}:{}: {CODE}: {}",
+        diagnostic.start.line(),
+        diagnostic.start.column(),
+        messages.join("; ")
+    )
+}
+
 /// The messages of a sentence's flags: its surface flags, then its syntactic flags.
 pub fn flag_messages(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec<FlagMessage> {
     let surface = sentence
@@ -239,6 +250,25 @@ mod tests {
         assert_eq!((found[1].end.line(), found[1].end.column()), (3, 11));
     }
 
+    /// Given the sentence flagged LongSentence and DeepTree
+    /// When its diagnostic is rendered compact
+    /// Then one line carries its position, the code and both flag messages joined by `; `
+    #[test]
+    fn compact_joins_the_flags_of_one_sentence() {
+        let file = file_of(vec![sentence(
+            0..15,
+            30,
+            vec![Flag::LongSentence],
+            vec![SyntacticFlag::DeepTree { depth: 6 }],
+        )]);
+        let found = diagnostics("First sentence.\n", &file, &THRESHOLDS).unwrap();
+        assert_eq!(
+            render_compact("f.md", &found[0]),
+            "f.md:1:1: CognitiveOverload: LongSentence: sentence has 30 words (max 25); \
+             DeepTree: dependency tree depth 6 edges (max 5)"
+        );
+    }
+
     /// Paragraphs of sentences of 1–12 words, some multi-byte, some with inline markup, LF or CRLF.
     fn document() -> impl Strategy<Value = String> {
         let word = prop::sample::select(vec![
@@ -253,6 +283,27 @@ mod tests {
     }
 
     proptest! {
+        /// Given generated documents with a limit of 0 words, so every sentence is flagged
+        /// When each diagnostic is rendered compact
+        /// Then the line splits into the path, the diagnostic's start line and column, the code,
+        /// and the diagnostic's flag messages
+        #[test]
+        fn compact_lines_carry_position_code_and_flags(doc in document()) {
+            let t = Thresholds { max_sentence_len: 0, ..THRESHOLDS };
+            let file = analyze(&doc, SourceFormat::Markdown, &t);
+            for d in diagnostics(&doc, &file, &t).unwrap() {
+                let line = render_compact("dir/f.md", &d);
+                let rest = line.strip_prefix("dir/f.md:").expect("the path first");
+                let mut parts = rest.splitn(4, ": ");
+                let position = parts.next().unwrap_or_default();
+                prop_assert_eq!(position, format!("{}:{}", d.start.line(), d.start.column()));
+                prop_assert_eq!(parts.next(), Some(CODE));
+                let message = parts.collect::<Vec<_>>().join(": ");
+                let expected: Vec<String> = d.flags.iter().map(ToString::to_string).collect();
+                prop_assert_eq!(message.split("; ").map(str::to_owned).collect::<Vec<_>>(), expected);
+            }
+        }
+
         /// Given generated documents and any sentence-length limit
         /// When their diagnostics are built
         /// Then there is one per flagged sentence, in source order, with that sentence's flag

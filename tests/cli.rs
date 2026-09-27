@@ -224,6 +224,24 @@ fn check_flags_a_long_sentence_and_exits_1() {
 }
 
 /// Given the file with one 30-word sentence
+/// When `vernier check --format compact` runs
+/// Then it prints one `path:line:col: CognitiveOverload: message` line for that sentence and exits 1
+#[test]
+fn check_compact_prints_one_line_per_flagged_sentence() {
+    let path = fixture("long.md");
+    assert_eq!(
+        check(&["--format", "compact"], &[&path]),
+        (
+            Some(1),
+            format!(
+                "{}:3:20: CognitiveOverload: LongSentence: sentence has 30 words (max 25)\n",
+                path.display()
+            )
+        )
+    );
+}
+
+/// Given the file with one 30-word sentence
 /// When `vernier check` runs with `--max-sentence-len` 29, then 30
 /// Then 29 flags it and exits 1, while 30 flags nothing and exits 0
 #[test]
