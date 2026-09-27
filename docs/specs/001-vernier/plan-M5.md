@@ -188,7 +188,7 @@ Each names the input where the mutant differs (audit 005).
 | 16 | JSON printed once per file | `json_is_one_document_for_all_files` (two files: `from_str` fails, "trailing characters") | [x] |
 | 17 | `analyze --format json` exits 1 on a flagged file | T9 exit-code test on `long.md` | [x] |
 | 18 | compact column counts bytes; *then* P10's generator without multi-byte text | P10 red with multi-byte text before a sentence (`Café ok. word …`), green without it (audit 005: the generator must reach it) | [x] (planted in `LineIndex::position`, the only source of `Diagnostic.start`, since `render_compact` gets no source: P10 red 3/3 with the multi-byte generator, green 3/3 with ASCII-only words) |
-| 19 | the example's `run` gains `\|\| true`; separately `continue-on-error: true` | P11 (each) | [ ] |
+| 19 | the example's `run` gains `\|\| true`; separately `continue-on-error: true` | P11 (each) | [x] (both red) |
 
 ## Coverage gap (run by hand)
 
@@ -284,5 +284,5 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13;
 | T8 | JSON document | `Cargo.toml`, `Cargo.lock`, `src/json.rs`, `src/lib.rs` | P8 and the schema witness against `document → Ok("{}")`; plants 14, 15 | `serde` + `serde_json`, output types, `document` | done (tests read floats back with `serde_json`'s `float_roundtrip`, a dev-only feature: the default parser missed a written `121.22000000000003` by one ulp) |
 | T9 | `--format json` for both commands | `src/main.rs`, `tests/cli.rs` | `json_is_one_document_for_all_files` (long.md + sample.md), `json_exit_codes_follow_the_command`; plants 16, 17 | `run` collects reports and prints one document | done (main's `diagnostics_list_surface_then_syntactic_flags_per_sentence` goes with the per-flag lines it tested, which no format prints any more; its law — surface then syntactic flags per sentence, at the sentence's start — is `diagnostic::one_diagnostic_per_flagged_sentence_with_all_its_flags`) |
 | T10 | positions in every format (criterion 6) | `tests/positions.rs` | P10 against a planted byte-column compact (plant 18); the property itself adds no production code, so its RED is plant 18 seen red, then reverted | — (property only) | done |
-| T11 | GitHub Actions example | `docs/examples/github-actions.yml`, `tests/examples.rs` | P11 against a missing file; plant 19 | the example workflow | todo |
+| T11 | GitHub Actions example | `docs/examples/github-actions.yml`, `tests/examples.rs` | P11 against a missing file; plant 19 | the example workflow | done (install step: `cargo install --locked --git https://github.com/OWNER/vernier vernier` with an `OWNER` placeholder and a comment; where vernier is installed from is the user's open question) |
 | T12 | close-out (main) | `spec.md` (ticks, Status), `docs/HANDOVER.md`, `README.md` (formats, example), this plan (ticks) | `just verify`; every plant seen red; the by-hand runs | — | todo |
