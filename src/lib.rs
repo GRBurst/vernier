@@ -6,6 +6,7 @@
 pub mod analysis;
 pub mod block;
 pub mod cli;
+pub mod decoder;
 pub mod dependency;
 pub mod diagnostic;
 pub mod json;

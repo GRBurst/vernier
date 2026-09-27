@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc aad3c9119dd55e6a73eb38e884080a1c3713d61bcb50298a45fba61bb11aff15 # shrinks to pieces = 0, max = 4
+cc e3dba67f8a11ca469547ea1af7c280da3689780718cd14587acd517c87218ccc # shrinks to (sentence, pieces, logits) = ("a", [Piece { id: 7, range: 0..1 }], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
