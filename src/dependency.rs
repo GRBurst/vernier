@@ -19,12 +19,23 @@ impl Token {
     }
 }
 
+/// What a parser makes of one sentence: its tokens, or nothing because the sentence is longer
+/// than the model can take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Parse {
+    /// The tokens, ids 1..n in order, head 0 = root.
+    Tokens(Vec<Token>),
+    /// The sentence has `pieces` subword pieces; the model takes at most `max`.
+    TooLong { pieces: usize, max: usize },
+}
+
 /// A dependency parser: the seam a real Universal Dependencies model fills (spec 001 M3b).
+/// `&mut self`: a model's inference session is used, and changed, by every parse.
 pub trait Parser {
     type Error: std::error::Error;
 
-    /// The tokens of one pre-segmented sentence, ids 1..n in order, head 0 = root.
-    fn parse(&self, sentence: &str) -> Result<Vec<Token>, Self::Error>;
+    /// The parse of one pre-segmented sentence.
+    fn parse(&mut self, sentence: &str) -> Result<Parse, Self::Error>;
 }
 
 /// Why a token list is not a dependency tree.

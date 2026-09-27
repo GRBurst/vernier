@@ -5,7 +5,7 @@ use std::convert::Infallible;
 use std::ops::Range;
 
 use crate::block::Block;
-use crate::dependency::{DependencyTree, Parser, Token, TreeError};
+use crate::dependency::{DependencyTree, Parse, Parser, Token, TreeError};
 use crate::nominalization::{
     NominalizationCount, Stoplist, parsed_nominalizations, surface_nominalizations,
 };
@@ -59,11 +59,14 @@ pub struct SentenceSyntax {
     pub passives: Vec<Passive>,
 }
 
-/// What a sentence's parse gave: nothing, because no parser ran, or its syntax.
+/// What a sentence's parse gave: nothing, because no parser ran or the sentence is too long for
+/// the model, or its syntax.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Syntax {
     /// No parser ran.
     Unparsed,
+    /// The sentence has `pieces` subword pieces; the model takes at most `max`.
+    TooLong { pieces: usize, max: usize },
     /// The parser gave a tree.
     Parsed(SentenceSyntax),
 }
@@ -73,7 +76,7 @@ impl Syntax {
     pub fn parsed(&self) -> Option<&SentenceSyntax> {
         match self {
             Self::Parsed(syntax) => Some(syntax),
-            Self::Unparsed => None,
+            Self::Unparsed | Self::TooLong { .. } => None,
         }
     }
 }
@@ -91,7 +94,8 @@ pub struct SentenceAnalysis {
 }
 
 /// One file's sentences, the sum of their counts, and the file's scores computed from that sum;
-/// `dependency_distance` and `passives` sum the sentences' and are `None` when nothing was parsed.
+/// `dependency_distance` and `passives` sum the parsed sentences' and are `None` when no parser
+/// ran.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileAnalysis {
     pub spans: usize,
@@ -106,8 +110,12 @@ pub struct FileAnalysis {
 /// Why a file could not be analyzed with a parser.
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisError<E: std::error::Error> {
-    #[error("the parser failed: {0}")]
-    Parse(#[source] E),
+    #[error("the parser failed on the sentence at byte {sentence_start}: {source}")]
+    Parse {
+        sentence_start: usize,
+        #[source]
+        source: E,
+    },
     #[error("the parse of the sentence at byte {sentence_start} is not a tree: {source}")]
     Malformed {
         sentence_start: usize,
@@ -118,20 +126,22 @@ pub enum AnalysisError<E: std::error::Error> {
 /// Analyzes `source`, read as `format`: every sentence's counts, scores and flags, and the file's
 /// totals and scores (formulas over the summed counts, never averages of sentence scores).
 pub fn analyze(source: &str, format: SourceFormat, thresholds: &Thresholds) -> FileAnalysis {
-    let Ok(file) = analyze_with::<Infallible>(source, format, thresholds, |_, _| Ok(None));
+    let Ok(file) =
+        analyze_with::<Infallible>(source, format, thresholds, |_, _| Ok(Outcome::Unparsed));
     file
 }
 
-/// Analyzes `source` like `analyze`, and also parses every sentence's text with `parser` to add
-/// its syntactic metrics and flags, and the file's summed dependency distance.
+/// Analyzes `source` like `analyze`, and also parses every sentence's text once with `parser`
+/// to add its syntactic metrics and flags (or that it is too long for the model), and the file's
+/// dependency distance and passives summed over the parsed sentences.
 pub fn analyze_parsed<P: Parser>(
     source: &str,
     format: SourceFormat,
     thresholds: &Thresholds,
-    parser: &P,
+    parser: &mut P,
 ) -> Result<FileAnalysis, AnalysisError<P::Error>> {
     let file = analyze_with(source, format, thresholds, |sentence, stoplist| {
-        parse_sentence(sentence, thresholds, stoplist, parser).map(Some)
+        parse_sentence(sentence, thresholds, stoplist, parser)
     })?;
     let parsed = file.sentences.iter().filter_map(|s| s.syntax.parsed());
     let dependency_distance = parsed.clone().map(|syntax| syntax.metrics.distance).sum();
@@ -155,6 +165,31 @@ struct Parsed {
     nominalizations: usize,
 }
 
+/// What parsing one sentence gave: nothing (no parser, or too long for the model), or a parse.
+enum Outcome {
+    Unparsed,
+    TooLong { pieces: usize, max: usize },
+    Parsed(Parsed),
+}
+
+impl Outcome {
+    /// The parsed nominalizations, `None` without a parse.
+    fn nominalizations(&self) -> Option<usize> {
+        match self {
+            Self::Parsed(parsed) => Some(parsed.nominalizations),
+            Self::Unparsed | Self::TooLong { .. } => None,
+        }
+    }
+
+    fn into_syntax(self) -> Syntax {
+        match self {
+            Self::Unparsed => Syntax::Unparsed,
+            Self::TooLong { pieces, max } => Syntax::TooLong { pieces, max },
+            Self::Parsed(parsed) => Syntax::Parsed(parsed.syntax),
+        }
+    }
+}
+
 /// The summed surface nominalizations and words of every sentence of `source`, read as `format`;
 /// the same count `analyze` gives the file.
 pub fn file_nominalizations(source: &str, format: SourceFormat) -> NominalizationCount {
@@ -168,28 +203,27 @@ pub fn file_nominalizations(source: &str, format: SourceFormat) -> Nominalizatio
     counts.into_iter().sum()
 }
 
-/// The analysis of `source`, with `parse` giving each sentence's parse (or `None` when there is
-/// no parser); the file's dependency distance and passives are left `None` for the caller to fill.
+/// The analysis of `source`, with `parse` giving each sentence's outcome (`Unparsed` when there
+/// is no parser); the file's dependency distance and passives are left `None` for the caller.
 fn analyze_with<E>(
     source: &str,
     format: SourceFormat,
     thresholds: &Thresholds,
-    parse: impl Fn(&Sentence<'_>, &Stoplist) -> Result<Option<Parsed>, E>,
+    mut parse: impl FnMut(&Sentence<'_>, &Stoplist) -> Result<Outcome, E>,
 ) -> Result<FileAnalysis, E> {
     let stoplist = Stoplist::committed();
     let sentences = each_sentence(source, format, |sentence| {
         let counts = sentence_counts(sentence);
-        let parsed = parse(sentence, &stoplist)?;
-        let nominalizations = parsed.as_ref().map_or_else(
-            || surface_nominalizations(words(sentence.text()), &stoplist),
-            |p| p.nominalizations,
-        );
+        let outcome = parse(sentence, &stoplist)?;
+        let nominalizations = outcome
+            .nominalizations()
+            .unwrap_or_else(|| surface_nominalizations(words(sentence.text()), &stoplist));
         Ok(SentenceAnalysis {
             source_range: sentence.source_range(),
             counts,
             readability: readability(counts),
             flags: flags(counts, thresholds),
-            syntax: parsed.map_or(Syntax::Unparsed, |p| Syntax::Parsed(p.syntax)),
+            syntax: outcome.into_syntax(),
             nominalizations: NominalizationCount {
                 nominalizations,
                 words: counts.words,
@@ -208,17 +242,36 @@ fn analyze_with<E>(
     })
 }
 
-/// The parse of one sentence's text: its syntactic metrics, the syntactic rules it breaks, its
-/// passives and its nominalizations.
+/// The parse of one sentence's text: too long for the model, or its syntactic metrics, the
+/// syntactic rules it breaks, its passives and its nominalizations.
 fn parse_sentence<P: Parser>(
     sentence: &Sentence<'_>,
     thresholds: &Thresholds,
     stoplist: &Stoplist,
-    parser: &P,
-) -> Result<Parsed, AnalysisError<P::Error>> {
-    let tokens = parser
+    parser: &mut P,
+) -> Result<Outcome, AnalysisError<P::Error>> {
+    let parse = parser
         .parse(sentence.text())
-        .map_err(AnalysisError::Parse)?;
+        .map_err(|source| AnalysisError::Parse {
+            sentence_start: sentence.source_range().start,
+            source,
+        })?;
+    match parse {
+        Parse::TooLong { pieces, max } => Ok(Outcome::TooLong { pieces, max }),
+        Parse::Tokens(tokens) => {
+            parsed_sentence(sentence, thresholds, stoplist, tokens).map(Outcome::Parsed)
+        }
+    }
+}
+
+/// What the tokens of one sentence's parse give: its syntactic metrics and flags, its passives
+/// and its nominalizations; an error when they are not a tree.
+fn parsed_sentence<E: std::error::Error>(
+    sentence: &Sentence<'_>,
+    thresholds: &Thresholds,
+    stoplist: &Stoplist,
+    tokens: Vec<Token>,
+) -> Result<Parsed, AnalysisError<E>> {
     let tree = DependencyTree::new(tokens).map_err(|source| AnalysisError::Malformed {
         sentence_start: sentence.source_range().start,
         source,
@@ -356,47 +409,76 @@ mod tests {
     impl Parser for FixtureParser {
         type Error = Unparsable;
 
-        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
+        fn parse(&mut self, sentence: &str) -> Result<Parse, Unparsable> {
             self.0
                 .iter()
                 .find(|(text, _)| text == sentence)
-                .map(|(_, tokens)| tokens.clone())
+                .map(|(_, tokens)| Parse::Tokens(tokens.clone()))
                 .ok_or_else(|| Unparsable(sentence.to_owned()))
         }
     }
 
-    /// Splits at whitespace and heads every token by the next; the last is the root.
+    /// The tokens of `sentence` split at whitespace, each headed by the next; the last is the root.
+    fn chain(sentence: &str) -> Vec<Token> {
+        let forms: Vec<&str> = sentence.split_whitespace().collect();
+        let n = forms.len();
+        forms
+            .iter()
+            .enumerate()
+            .map(|(i, form)| Token {
+                id: i + 1,
+                form: (*form).to_owned(),
+                lemma: (*form).to_owned(),
+                upostag: "X".to_owned(),
+                head: if i + 1 == n { 0 } else { i + 2 },
+                deprel: if i + 1 == n { "root" } else { "dep" }.to_owned(),
+            })
+            .collect()
+    }
+
+    /// Parses every sentence into its `chain`.
     struct ChainParser;
 
     impl Parser for ChainParser {
         type Error = Unparsable;
 
-        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
-            let forms: Vec<&str> = sentence.split_whitespace().collect();
-            let n = forms.len();
-            Ok(forms
-                .iter()
-                .enumerate()
-                .map(|(i, form)| Token {
-                    id: i + 1,
-                    form: (*form).to_owned(),
-                    lemma: (*form).to_owned(),
-                    upostag: "X".to_owned(),
-                    head: if i + 1 == n { 0 } else { i + 2 },
-                    deprel: if i + 1 == n { "root" } else { "dep" }.to_owned(),
-                })
-                .collect())
+        fn parse(&mut self, sentence: &str) -> Result<Parse, Unparsable> {
+            Ok(Parse::Tokens(chain(sentence)))
         }
     }
 
-    /// Fails on every sentence.
-    struct FailingParser;
+    /// Answers `TooLong` for a sentence of more than `.0` whitespace-separated words (its words
+    /// are its pieces, `.0` the maximum), and its `chain` otherwise.
+    struct TooLongParser(usize);
+
+    impl Parser for TooLongParser {
+        type Error = Unparsable;
+
+        fn parse(&mut self, sentence: &str) -> Result<Parse, Unparsable> {
+            let pieces = sentence.split_whitespace().count();
+            Ok(if pieces > self.0 {
+                Parse::TooLong {
+                    pieces,
+                    max: self.0,
+                }
+            } else {
+                Parse::Tokens(chain(sentence))
+            })
+        }
+    }
+
+    /// Fails on every sentence that starts with `.0`, and chains every other.
+    struct FailingParser(&'static str);
 
     impl Parser for FailingParser {
         type Error = Unparsable;
 
-        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
-            Err(Unparsable(sentence.to_owned()))
+        fn parse(&mut self, sentence: &str) -> Result<Parse, Unparsable> {
+            if sentence.starts_with(self.0) {
+                Err(Unparsable(sentence.to_owned()))
+            } else {
+                Ok(Parse::Tokens(chain(sentence)))
+            }
         }
     }
 
@@ -418,13 +500,14 @@ mod tests {
     /// at 3.0, and never DeepTree or ClauseOverload
     #[test]
     fn example_is_center_embedded_and_high_mdd_only_below_8_3() {
-        let parser = example_parser(EXAMPLE_TEXT);
-        let flags_at = |max_mdd: f64| {
+        let mut parser = example_parser(EXAMPLE_TEXT);
+        let mut flags_at = |max_mdd: f64| {
             let t = Thresholds {
                 max_mdd,
                 ..thresholds(25)
             };
-            let file = analyze_parsed(EXAMPLE_TEXT, SourceFormat::Markdown, &t, &parser).unwrap();
+            let file =
+                analyze_parsed(EXAMPLE_TEXT, SourceFormat::Markdown, &t, &mut parser).unwrap();
             assert_eq!(file.sentences.len(), 1);
             file.sentences[0].syntax.parsed().unwrap().flags.clone()
         };
@@ -446,8 +529,13 @@ mod tests {
     #[test]
     fn parses_the_prose_not_the_markup() {
         let source = EXAMPLE_TEXT.replacen("The proposal", "**The proposal**", 1);
-        let parser = example_parser(EXAMPLE_TEXT);
-        let file = analyze_parsed(&source, SourceFormat::Markdown, &thresholds(25), &parser);
+        let mut parser = example_parser(EXAMPLE_TEXT);
+        let file = analyze_parsed(
+            &source,
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &mut parser,
+        );
         let syntax = file.unwrap().sentences[0].syntax.parsed().cloned().unwrap();
         assert!(syntax.flags.contains(&proposal_caused_8()), "{syntax:?}");
     }
@@ -461,10 +549,31 @@ mod tests {
             "One sentence here.",
             SourceFormat::Markdown,
             &thresholds(25),
-            &FailingParser,
+            &mut FailingParser(""),
         );
         assert!(
-            matches!(&result, Err(AnalysisError::Parse(Unparsable(text))) if text == "One sentence here."),
+            matches!(&result, Err(AnalysisError::Parse { source: Unparsable(text), .. }) if text == "One sentence here."),
+            "{result:?}"
+        );
+    }
+
+    /// Given a file whose second sentence (at byte 17) the parser fails on
+    /// When the file is analyzed with it
+    /// Then the analysis fails with the parser's error, naming the sentence's start
+    #[test]
+    fn a_parse_error_names_the_sentence_start() {
+        let result = analyze_parsed(
+            "Fine words here. Broken one.",
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &mut FailingParser("Broken"),
+        );
+        assert!(
+            matches!(
+                &result,
+                Err(AnalysisError::Parse { sentence_start: 17, source: Unparsable(text) })
+                    if text == "Broken one."
+            ),
             "{result:?}"
         );
     }
@@ -475,18 +584,15 @@ mod tests {
     #[test]
     fn a_malformed_parse_fails_the_analysis_at_its_sentence() {
         let cycle = tokens_from_conllu("1 Broken broken X _ _ 2 dep\n2 one. one X _ _ 1 dep");
-        let parser = FixtureParser(vec![
-            (
-                "Fine words here.".to_owned(),
-                ChainParser.parse("Fine words here.").unwrap(),
-            ),
+        let mut parser = FixtureParser(vec![
+            ("Fine words here.".to_owned(), chain("Fine words here.")),
             ("Broken one.".to_owned(), cycle),
         ]);
         let result = analyze_parsed(
             "Fine words here. Broken one.",
             SourceFormat::Markdown,
             &thresholds(25),
-            &parser,
+            &mut parser,
         );
         assert!(
             matches!(
@@ -500,14 +606,45 @@ mod tests {
         );
     }
 
+    /// Given a 3-word sentence and a 6-word one, and a parser that finds sentences of more than
+    /// 4 words too long
+    /// When the file is analyzed with it
+    /// Then the first is parsed, the second too long (6 pieces, max 4), and the file's dependency
+    /// distance is the first's (2 dependencies of distance 1 each)
+    #[test]
+    fn one_long_sentence_leaves_the_file_distance_of_the_others() {
+        let file = analyze_parsed(
+            "Short one here. This one has exactly six words.",
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &mut TooLongParser(4),
+        )
+        .unwrap();
+        let syntax: Vec<&Syntax> = file.sentences.iter().map(|s| &s.syntax).collect();
+        assert!(matches!(syntax[0], Syntax::Parsed(_)), "{syntax:?}");
+        assert_eq!(syntax[1], &Syntax::TooLong { pieces: 6, max: 4 });
+        assert_eq!(
+            file.dependency_distance,
+            Some(DependencyDistance {
+                total: 2,
+                dependencies: 2
+            })
+        );
+    }
+
     /// Given an empty file
     /// When it is analyzed without a parser, and with one
     /// Then its dependency distance is absent without a parser and zero with one
     #[test]
     fn dependency_distance_is_absent_without_a_parser_and_zero_with_one() {
         assert_eq!(md("", 25).dependency_distance, None);
-        let parsed =
-            analyze_parsed("", SourceFormat::Markdown, &thresholds(25), &ChainParser).unwrap();
+        let parsed = analyze_parsed(
+            "",
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &mut ChainParser,
+        )
+        .unwrap();
         assert_eq!(
             parsed.dependency_distance,
             Some(DependencyDistance::default())
@@ -537,12 +674,17 @@ mod tests {
     /// its lemma `decision`, and the words stay M2's
     #[test]
     fn counts_parsed_nominalizations_of_the_nomz_sentence() {
-        let parser = FixtureParser(vec![(
+        let mut parser = FixtureParser(vec![(
             NOMZ_TEXT.to_owned(),
             tokens_from_conllu(NOMZ_CONLLU),
         )]);
-        let file =
-            analyze_parsed(NOMZ_TEXT, SourceFormat::Markdown, &thresholds(25), &parser).unwrap();
+        let file = analyze_parsed(
+            NOMZ_TEXT,
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &mut parser,
+        )
+        .unwrap();
         let expected = NominalizationCount {
             nominalizations: 3,
             words: 14,
@@ -557,14 +699,19 @@ mod tests {
     /// file counts 2 passives
     #[test]
     fn reports_passives_at_their_verbs() {
-        let parser = FixtureParser(vec![(
+        let mut parser = FixtureParser(vec![(
             PASSIVE_TEXT.to_owned(),
             tokens_from_conllu(PASSIVE_CONLLU),
         )]);
         let bold = PASSIVE_TEXT.replacen("written", "**written**", 1);
         for source in [PASSIVE_TEXT.to_owned(), bold] {
-            let file =
-                analyze_parsed(&source, SourceFormat::Markdown, &thresholds(25), &parser).unwrap();
+            let file = analyze_parsed(
+                &source,
+                SourceFormat::Markdown,
+                &thresholds(25),
+                &mut parser,
+            )
+            .unwrap();
             let passives = &file.sentences[0].syntax.parsed().unwrap().passives;
             let expected = ["written", "rejected"].map(|verb| Passive {
                 verb: verb.to_owned(),
@@ -584,8 +731,8 @@ mod tests {
     impl Parser for PassiveChainParser {
         type Error = Unparsable;
 
-        fn parse(&self, sentence: &str) -> Result<Vec<Token>, Unparsable> {
-            let mut tokens = ChainParser.parse(sentence)?;
+        fn parse(&mut self, sentence: &str) -> Result<Parse, Unparsable> {
+            let mut tokens = chain(sentence);
             let n = tokens.len();
             for (i, token) in tokens.iter_mut().enumerate() {
                 token.upostag = "NOUN".to_owned();
@@ -597,7 +744,7 @@ mod tests {
                     token.form = token.form.to_uppercase();
                 }
             }
-            Ok(tokens)
+            Ok(Parse::Tokens(tokens))
         }
     }
 
@@ -809,7 +956,7 @@ mod tests {
         fn parsing_adds_syntax_and_changes_nothing_else(doc in document(), max in 0usize..40) {
             let t = thresholds(max);
             let plain = analyze(&doc, SourceFormat::Markdown, &t);
-            let parsed = analyze_parsed(&doc, SourceFormat::Markdown, &t, &ChainParser).unwrap();
+            let parsed = analyze_parsed(&doc, SourceFormat::Markdown, &t, &mut ChainParser).unwrap();
             prop_assert_eq!(surface_only(&parsed), plain.clone());
             prop_assert_eq!(plain.dependency_distance, None);
             prop_assert!(plain.sentences.iter().all(|s| s.syntax == Syntax::Unparsed));
@@ -817,12 +964,42 @@ mod tests {
             for s in &parsed.sentences {
                 let syntax = s.syntax.parsed().expect("every sentence is parsed");
                 let text = &doc[s.source_range.clone()];
-                let tree = DependencyTree::new(ChainParser.parse(text).unwrap()).unwrap();
+                let tree = DependencyTree::new(chain(text)).unwrap();
                 prop_assert_eq!(&syntax.metrics, &syntactic_metrics(&tree));
                 prop_assert_eq!(&syntax.flags, &syntactic_flags(&syntax.metrics, &t));
                 sum = sum + syntax.metrics.distance;
             }
             prop_assert_eq!(parsed.dependency_distance, Some(sum));
+        }
+
+        /// Given generated Markdown paragraphs and a parser that answers `TooLong` for a sentence
+        /// of more than k words and chains the words of every other
+        /// When the file is analyzed with it
+        /// Then a sentence is `TooLong` (with its pieces and the maximum) exactly when it has more
+        /// than k words, else `Parsed`; the surface analysis is unchanged; and the file's
+        /// dependency distance is present and the sum over the parsed sentences only
+        #[test]
+        fn too_long_sentences_are_skipped_and_the_rest_pooled(doc in document(), k in 0usize..40) {
+            let t = thresholds(25);
+            let file = analyze_parsed(&doc, SourceFormat::Markdown, &t, &mut TooLongParser(k)).unwrap();
+            prop_assert_eq!(surface_only(&file), analyze(&doc, SourceFormat::Markdown, &t));
+            let mut sum = DependencyDistance::default();
+            for s in &file.sentences {
+                let text = &doc[s.source_range.clone()];
+                let pieces = text.split_whitespace().count();
+                match &s.syntax {
+                    Syntax::TooLong { pieces: p, max } => {
+                        prop_assert!(pieces > k, "{:?}", text);
+                        prop_assert_eq!((*p, *max), (pieces, k));
+                    }
+                    Syntax::Parsed(syntax) => {
+                        prop_assert!(pieces <= k, "{:?}", text);
+                        sum = sum + syntax.metrics.distance;
+                    }
+                    Syntax::Unparsed => prop_assert!(false, "unparsed with a parser: {:?}", text),
+                }
+            }
+            prop_assert_eq!(file.dependency_distance, Some(sum));
         }
 
         /// Given generated paragraphs with nominalizations
@@ -852,7 +1029,7 @@ mod tests {
         #[test]
         fn parsed_passives_and_nominalizations_add_up(doc in nominal_document()) {
             prop_assert_eq!(md(&doc, 25).passives, None);
-            let file = analyze_parsed(&doc, SourceFormat::Markdown, &thresholds(25), &PassiveChainParser).unwrap();
+            let file = analyze_parsed(&doc, SourceFormat::Markdown, &thresholds(25), &mut PassiveChainParser).unwrap();
             let mut passives = 0;
             for s in &file.sentences {
                 let syntax = s.syntax.parsed().expect("parsed");
@@ -864,7 +1041,9 @@ mod tests {
                         "{:?}", p
                     );
                 }
-                let tokens = PassiveChainParser.parse(&doc[s.source_range.clone()]).unwrap();
+                let Parse::Tokens(tokens) = PassiveChainParser.parse(&doc[s.source_range.clone()]).unwrap() else {
+                    panic!("PassiveChainParser always gives tokens");
+                };
                 prop_assert_eq!(s.nominalizations.nominalizations, parsed_nominalizations(&tokens, &Stoplist::committed()));
                 prop_assert_eq!(s.nominalizations.words, s.counts.words);
             }

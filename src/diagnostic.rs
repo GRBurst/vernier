@@ -130,7 +130,8 @@ const RENDER_WIDTH: usize = 100_000;
 
 /// The rule metrics of a sentence, one line each: words, mean dependency distance, tree depth,
 /// subordinate clauses, then one line per center-embedding (or `none`); a syntactic metric of an
-/// unparsed sentence is `absent (no parse)`.
+/// unparsed sentence is `absent (no parse)`, of one too long for the model `absent (too long for
+/// the model)`.
 pub fn metric_lines(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec<String> {
     let words = sentence.counts.words;
     let long = sentence.flags.contains(&Flag::LongSentence);
@@ -140,9 +141,8 @@ pub fn metric_lines(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec
         thresholds.max_sentence_len
     );
     let syntactic = match &sentence.syntax {
-        Syntax::Unparsed => ABSENT_WITHOUT_PARSE
-            .map(|name| format!("{name}: absent (no parse)"))
-            .to_vec(),
+        Syntax::Unparsed => absent_lines("no parse"),
+        Syntax::TooLong { .. } => absent_lines("too long for the model"),
         Syntax::Parsed(syntax) => parsed_lines(syntax, thresholds),
     };
     std::iter::once(head).chain(syntactic).collect()
@@ -155,6 +155,13 @@ const ABSENT_WITHOUT_PARSE: [&str; 4] = [
     "subordinate clauses",
     "center-embedding",
 ];
+
+/// Every syntactic metric line as absent, for `reason`.
+fn absent_lines(reason: &str) -> Vec<String> {
+    ABSENT_WITHOUT_PARSE
+        .map(|name| format!("{name}: absent ({reason})"))
+        .to_vec()
+}
 
 /// `"Flag, "` when the flag was raised, else nothing.
 fn raised(is_raised: bool, name: &str) -> String {
@@ -568,6 +575,31 @@ mod tests {
         );
     }
 
+    /// Given an unflagged 12-word sentence the model found too long (600 pieces, max 509)
+    /// When its metric lines are listed
+    /// Then each syntactic metric reads `absent (too long for the model)`, and it has no flag
+    #[test]
+    fn a_too_long_sentence_reads_absent_too_long_for_the_model() {
+        let sentence = SentenceAnalysis {
+            syntax: Syntax::TooLong {
+                pieces: 600,
+                max: 509,
+            },
+            ..measured(12, None, &THRESHOLDS)
+        };
+        assert_eq!(
+            metric_lines(&sentence, &THRESHOLDS),
+            [
+                "words: 12 (max 25)",
+                "mean dependency distance: absent (too long for the model)",
+                "tree depth: absent (too long for the model)",
+                "subordinate clauses: absent (too long for the model)",
+                "center-embedding: absent (too long for the model)",
+            ]
+        );
+        assert!(flag_messages(&sentence, &THRESHOLDS).is_empty());
+    }
+
     fn metrics_or_none() -> impl Strategy<Value = Option<SyntacticMetrics>> {
         let embedding = (0usize..12).prop_map(|words_between| CenterEmbedding {
             subject: "proposal".to_owned(),
@@ -612,7 +644,8 @@ mod tests {
         /// Given any sentence, parsed or not, and thresholds that equal its metrics half the time
         /// When its metric lines are listed
         /// Then the words line names LongSentence exactly when the words exceed the maximum; an
-        /// unparsed sentence has its four syntactic lines absent; a parsed one names HighMdd,
+        /// unparsed sentence has its four syntactic lines absent (no parse), one too long for the
+        /// model absent (too long for the model); a parsed one names HighMdd,
         /// DeepTree and ClauseOverload exactly when it raised them, and lists one center-embedding
         /// line per CenterEmbedding flag
         #[test]
@@ -621,6 +654,7 @@ mod tests {
             metrics in metrics_or_none(),
             same in any::<[bool; 4]>(),
             other in (0usize..40, 0.5f64..4.0, 0usize..9, 0usize..5),
+            too_long in any::<bool>(),
         ) {
             let mdd = metrics.as_ref().and_then(SyntacticMetrics::mdd);
             let t = Thresholds {
@@ -629,13 +663,20 @@ mod tests {
                 max_tree_depth: match (same[2], &metrics) { (true, Some(m)) => m.depth, _ => other.2 },
                 max_clauses: match (same[3], &metrics) { (true, Some(m)) => m.clauses, _ => other.3 },
             };
-            let sentence = measured(words, metrics, &t);
+            let mut sentence = measured(words, metrics, &t);
+            if too_long && sentence.syntax == Syntax::Unparsed {
+                sentence.syntax = Syntax::TooLong { pieces: 510, max: 509 };
+            }
             let lines = metric_lines(&sentence, &t);
             prop_assert_eq!(lines[0].contains("LongSentence"), words > t.max_sentence_len, "{}", lines[0]);
             match &sentence.syntax {
                 Syntax::Unparsed => {
                     prop_assert_eq!(lines.len(), 5);
                     prop_assert!(lines[1..].iter().all(|l| l.ends_with("absent (no parse)")), "{:?}", lines);
+                }
+                Syntax::TooLong { .. } => {
+                    prop_assert_eq!(lines.len(), 5);
+                    prop_assert!(lines[1..].iter().all(|l| l.ends_with("absent (too long for the model)")), "{:?}", lines);
                 }
                 Syntax::Parsed(syntax) => {
                     let raised = |name: &str| syntax.flags.iter().any(|f| syntactic_message(f, &t).name == name);
