@@ -1,13 +1,37 @@
 //! Diagnostics (spec 001 M5): what a flagged sentence reports, and how it is rendered.
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::ops::Range;
+
+use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 
 use crate::analysis::{FileAnalysis, Flag, SentenceAnalysis, SyntacticFlag, Thresholds};
 use crate::position::{LineIndex, Position, PositionError};
 
 /// The code of every vernier diagnostic.
 pub const CODE: &str = "CognitiveOverload";
+
+/// The title of every vernier diagnostic.
+pub const TITLE: &str = "Sentence exceeds human working-memory capacity";
+
+/// Whether rendered text carries ANSI colour; the content is the same either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    Plain,
+    Color,
+}
+
+impl Style {
+    /// Colour only on a terminal, and only while `NO_COLOR` is unset or empty (no-color.org).
+    pub fn for_output(is_terminal: bool, no_color: Option<&OsStr>) -> Self {
+        if is_terminal && no_color.is_none_or(OsStr::is_empty) {
+            Self::Color
+        } else {
+            Self::Plain
+        }
+    }
+}
 
 /// What one flagged sentence reports: where it starts and ends, and the flags it raised.
 #[derive(Debug, Clone, PartialEq)]
@@ -65,6 +89,26 @@ pub fn render_compact(path: &str, diagnostic: &Diagnostic) -> String {
         messages.join("; ")
     )
 }
+
+/// The annotated diagnostic: `warning[CognitiveOverload]`, the sentence's position, and its source
+/// lines with the whole sentence underlined.
+pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Style) -> String {
+    let group = Level::WARNING.primary_title(TITLE).id(CODE).element(
+        Snippet::source(source)
+            .path(path)
+            .annotation(AnnotationKind::Primary.span(diagnostic.source_range.clone())),
+    );
+    let renderer = match style {
+        Style::Plain => Renderer::plain(),
+        Style::Color => Renderer::styled(),
+    };
+    // why: prose lines are often whole paragraphs; the default width (140) would elide the
+    // middle of the sentence the diagnostic is about.
+    renderer.term_width(RENDER_WIDTH).render(&[group])
+}
+
+/// A line width no prose line reaches, so no source line is elided.
+const RENDER_WIDTH: usize = 100_000;
 
 /// The messages of a sentence's flags: its surface flags, then its syntactic flags.
 pub fn flag_messages(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec<FlagMessage> {
@@ -269,6 +313,60 @@ mod tests {
         );
     }
 
+    /// `text` without its ANSI escape sequences (`ESC [ … m`).
+    fn strip_ansi(text: &str) -> String {
+        let mut plain = String::new();
+        let mut chars = text.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                chars.by_ref().find(|&d| d == 'm');
+            } else {
+                plain.push(c);
+            }
+        }
+        plain
+    }
+
+    /// Given every combination of terminal or not and `NO_COLOR` unset, empty or set
+    /// When the output style is chosen
+    /// Then colour is chosen only on a terminal with `NO_COLOR` unset or empty
+    #[test]
+    fn colour_only_on_a_terminal_without_no_color() {
+        let cases = [
+            (true, None, Style::Color),
+            (true, Some(""), Style::Color),
+            (true, Some("1"), Style::Plain),
+            (true, Some("0"), Style::Plain),
+            (false, None, Style::Plain),
+            (false, Some(""), Style::Plain),
+            (false, Some("1"), Style::Plain),
+        ];
+        for (is_terminal, no_color, expected) in cases {
+            let style = Style::for_output(is_terminal, no_color.map(OsStr::new));
+            assert_eq!(style, expected, "{is_terminal} {no_color:?}");
+        }
+    }
+
+    /// Given a 30-word sentence on a line of about 190 characters (the `long.md` fixture)
+    /// When its diagnostic is rendered as text
+    /// Then the whole line is shown, not elided, under the header and position
+    #[test]
+    fn a_long_line_is_shown_whole() {
+        let source = include_str!("../tests/fixtures/long.md");
+        let t = Thresholds {
+            max_sentence_len: 25,
+            ..THRESHOLDS
+        };
+        let file = analyze(source, SourceFormat::Markdown, &t);
+        let found = diagnostics(source, &file, &t).unwrap();
+        let text = render_text("long.md", source, &found[0], Style::Plain);
+        let line = source.lines().nth(2).unwrap();
+        assert!(line.len() > 140, "{}", line.len());
+        assert!(text.lines().any(|l| l.ends_with(line)), "{text}");
+        assert!(!text.contains("..."), "{text}");
+        assert_eq!(text.lines().nth(1).map(str::trim), Some("--> long.md:3:20"));
+    }
+
     /// Paragraphs of sentences of 1–12 words, some multi-byte, some with inline markup, LF or CRLF.
     fn document() -> impl Strategy<Value = String> {
         let word = prop::sample::select(vec![
@@ -283,6 +381,59 @@ mod tests {
     }
 
     proptest! {
+        /// Given generated documents with every sentence flagged
+        /// When each diagnostic is rendered as text, plain and in colour
+        /// Then it opens with `warning[CognitiveOverload]` and the title, then ` --> path:line:col`
+        /// at the diagnostic's start; plain has no escape codes, and colour differs from plain only
+        /// by them
+        #[test]
+        fn text_opens_with_the_code_and_the_position(doc in document()) {
+            let t = Thresholds { max_sentence_len: 0, ..THRESHOLDS };
+            let file = analyze(&doc, SourceFormat::Markdown, &t);
+            for d in diagnostics(&doc, &file, &t).unwrap() {
+                let plain = render_text("f.md", &doc, &d, Style::Plain);
+                let lines: Vec<&str> = plain.lines().collect();
+                prop_assert_eq!(lines[0], format!("warning[{CODE}]: {TITLE}"));
+                prop_assert_eq!(lines[1].trim(), format!("--> f.md:{}:{}", d.start.line(), d.start.column()));
+                prop_assert!(!plain.contains('\x1b'));
+                let coloured = render_text("f.md", &doc, &d, Style::Color);
+                prop_assert!(coloured.contains('\x1b'));
+                prop_assert_eq!(strip_ansi(&coloured), plain);
+            }
+        }
+
+        /// Given one-line paragraphs of capitalized ASCII sentences, every sentence flagged
+        /// When each diagnostic is rendered as text
+        /// Then the run of `^` starts under the sentence's first character and is as long as the
+        /// sentence
+        #[test]
+        fn the_underline_covers_a_one_line_sentence(
+            sentences in prop::collection::vec(("[A-Z][a-z]{0,5}q", prop::collection::vec("[a-z]{0,6}q", 0..7)), 1..5)
+        ) {
+            // Capitalized starts: UAX #29 does not break before a lower-case word; the final `q`
+            // keeps every word off the abbreviation list (`Dr.`, `vs.` would merge two sentences).
+            let line = sentences
+                .iter()
+                .map(|(first, rest)| format!("{}.", std::iter::once(first).chain(rest).cloned().collect::<Vec<_>>().join(" ")))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let doc = format!("# Title\n\n{line}\n");
+            let t = Thresholds { max_sentence_len: 0, ..THRESHOLDS };
+            let file = analyze(&doc, SourceFormat::Markdown, &t);
+            let found = diagnostics(&doc, &file, &t).unwrap();
+            prop_assert_eq!(found.len(), sentences.len());
+            for d in found {
+                let text = render_text("f.md", &doc, &d, Style::Plain);
+                let shown = text.lines().find(|l| l.ends_with(line.as_str())).expect("the source line");
+                let text_at = shown.len() - line.len();
+                let marker = text.lines().find(|l| l.contains('^')).expect("a marker line");
+                let first = marker.find('^').expect("a caret");
+                let run = marker[first..].chars().take_while(|&c| c == '^').count();
+                prop_assert_eq!(first, text_at + d.start.column() - 1, "{}", text);
+                prop_assert_eq!(run, d.source_range.len(), "{}", text);
+            }
+        }
+
         /// Given generated documents with a limit of 0 words, so every sentence is flagged
         /// When each diagnostic is rendered compact
         /// Then the line splits into the path, the diagnostic's start line and column, the code,

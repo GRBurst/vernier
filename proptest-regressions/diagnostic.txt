@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 51e607b5f466a80a0b27af87dbea1b7965ffdc9d63785a12599c7b4026fc205c # shrinks to doc = "word. word word word 漢字 word word. **bold** word word word.\n", max = 0
+cc c0fb8befcd6d8769efab084c2a0d0f95d08ffabcea34fb5ac6a8e8909811487a # shrinks to sentences = [("Aq", ["vs"]), ("Aq", [])]

@@ -174,11 +174,11 @@ Each names the input where the mutant differs (audit 005).
 | 2 | `end = start` | P2 on any sentence of ≥ 2 chars (`One two.`: 1:9 ≠ 1:1) | [x] |
 | 3 | compact code = the first flag's name | compact witness on `long.md` (`LongSentence` ≠ `CognitiveOverload`) | [x] (CLI witness, P3 and the two-flag witness red) |
 | 4 | compact joins flags with `, ` | two-flag witness | [x] |
-| 5 | `Style` ignores `NO_COLOR` | style law at `(true, Some("1"))` | [ ] |
-| 6 | `Style` treats an empty `NO_COLOR` as set | style law at `(true, Some(""))` | [ ] |
-| 7 | `render_text` always uses `Renderer::styled()` | P5 (`Plain` has `\x1b`) on any diagnostic | [ ] |
+| 5 | `Style` ignores `NO_COLOR` | style law at `(true, Some("1"))` | [x] |
+| 6 | `Style` treats an empty `NO_COLOR` as set | style law at `(true, Some(""))` | [x] |
+| 7 | `render_text` always uses `Renderer::styled()` | P5 (`Plain` has `\x1b`) on any diagnostic | [x] |
 | 8 | the annotation span ends at the end of the sentence's first line | `wrapped.md` witness (no closing marker on line 3) | [ ] |
-| 9 | default `term_width` (140) | `long.md` text witness (the line is shown with `...`) | [ ] |
+| 9 | default `term_width` (140) | `long.md` text witness (the line is shown with `...`) | [x] (unit copy `a_long_line_is_shown_whole`; P6 red too) |
 | 10 | `words` line uses `>=` | P7 with `words == max` (the generator draws `max = words` half the time) | [ ] |
 | 11 | syntactic lines print `0` when `syntax = None` | P7 on any unparsed sentence | [ ] |
 | 12 | `main` passes `Style::Color` unconditionally | `check_writes_no_escape_codes_off_a_terminal` | [ ] |
@@ -277,7 +277,7 @@ One task = one scenario = one commit (`git -c commit.gpgsign=false commit`, D13;
 | T1 | refactor: messages into the core | `src/diagnostic.rs`, `src/lib.rs`, `src/main.rs` | — (refactor). Evidence: `describes_each_syntactic_flag_with_its_value` and `diagnostics_list_surface_then_syntactic_flags_per_sentence` move with unchanged assertions; all `tests/cli.rs` `check` tests green before and after | `FlagMessage`, `flag_messages`; `main` prints `{path}:{l}:{c}: {flag}` from them | done |
 | T2 | diagnostic model | `src/diagnostic.rs`, `src/main.rs` | P1, P2, two-flag witness against `diagnostics → vec![]`; plants 1, 2 | `Diagnostic`, `diagnostics`; `main`'s per-flag lines are built from it (output unchanged) | done |
 | T3 | compact format | `src/diagnostic.rs`, `src/main.rs`, `tests/cli.rs` | P3 and `check_compact_prints_one_line_per_flagged_sentence` (long.md) against `render_compact → String::new()`; plants 3, 4 | `render_compact`; `--format compact` for `check` | done |
-| T4 | text renderer | `Cargo.toml`, `Cargo.lock`, `src/diagnostic.rs` | P4, P5, P6, style law against `render_text → String::new()` and `for_output → Plain`; plants 5, 6, 7, 9 (on a unit copy of `long.md`) | `annotate-snippets` 0.12, `Style`, `render_text` (no footer yet) | todo |
+| T4 | text renderer | `Cargo.toml`, `Cargo.lock`, `src/diagnostic.rs` | P4, P5, P6, style law against `render_text → String::new()` and `for_output → Plain`; plants 5, 6, 7, 9 (on a unit copy of `long.md`) | `annotate-snippets` 0.12, `Style`, `render_text` (no footer yet) | done |
 | T5 | metric lines | `src/diagnostic.rs` | P7 and the parsed-example witness against `metric_lines → vec![]`; plants 10, 11 | `metric_lines`, `= metrics:` footer | todo |
 | T6 | `check` defaults to the annotated text | `src/main.rs`, `tests/cli.rs`, `tests/fixtures/wrapped.md` | `check_prints_a_cognitive_overload_diagnostic` (long.md), `check_underlines_a_hard_wrapped_sentence` (wrapped.md), `check_writes_no_escape_codes_off_a_terminal` (with and without `NO_COLOR`); plants 8, 12. **Changed tests:** `check_flags_a_long_sentence_and_exits_1`, `max_sentence_len_raises_the_bar` and `check_flags_the_samples_13_word_sentence_over_a_limit_of_10` pin today's one-line output. They gain `--format compact`, and `CognitiveOverload: ` is inserted in their expected lines: M5 makes the annotated diagnostic the default, and their laws (position, threshold boundary, exit code) are kept unchanged in compact | text as the default for `check` | todo |
 | T7 | `analyze` table | `src/summary.rs`, `tests/cli.rs` | P9, `analyze_prints_a_metrics_table_and_exits_0_on_a_flagged_file`; plant 13. **Changed tests (layout only):** `analyze_prints_surface_metrics` (reads rows instead of lines 2–4), `analyze_prints_the_nominalization_ratio` (the row instead of line 4), and summary's `renders_*`/`empty_file_has_no_nominalization_ratio` (rows instead of lines; values unchanged). `FileSummary` literals gain the two new fields | table `render`; `FileSummary.{mean_dependency_distance, passives}` | todo |
