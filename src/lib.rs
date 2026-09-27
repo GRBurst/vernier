@@ -12,6 +12,7 @@ pub mod diagnostic;
 pub mod json;
 pub mod mst;
 pub mod nominalization;
+pub mod onnx;
 pub mod passive;
 pub mod position;
 pub mod prose;

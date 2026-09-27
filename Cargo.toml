@@ -9,10 +9,13 @@ publish = false
 [dependencies]
 annotate-snippets = "0.12"
 clap = { version = "4", features = ["derive"] }
+# why: ONNX Runtime is loaded at run time (dlopen), only with --model-path; ADR 0001.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+tokenizers = { version = "=0.23.2", default-features = false, features = ["fancy-regex"] }
 unicode-segmentation = "1"
 
 [lints.rust]
