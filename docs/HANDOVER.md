@@ -92,12 +92,12 @@ cargo run -q -- check --format json tests/fixtures/long.md   # {"schema_version"
   - run `vernier check` on one of your own Markdown files and skim the flagged positions. `check README.md docs/specs/001-vernier/spec.md` flags 28 sentences; they looked right on a spot check.
 - M3a decisions to confirm (plan-M3a "Decisions made"): a content token with only `PUNCT` ancestors becomes a projected root; `words_between` counts tokens whose form has a letter or digit; the subject's head is not required to be a `VERB`.
 - M4 candidate stoplist additions (see above); decide on real prose, not by guess.
-- M3b: user decisions pending (asked 2026-09-27): route (udpipe recommended), which model the M3a-example integration test names (EWT parses it wrong; GUM/ParTUT right) or reword the criterion, the performance budget, a LICENSE file, the example's install source.
-- M3b if udpipe: vendor `udpipe-rs` with the presegmented one-line patch and without `ureq`/`rustls`/`ring` (plus an upstream PR later); write an ADR for the in-process C++ dependency (no `unsafe` in vernier itself).
+- M3b decided by the user 2026-09-27 (3d31b3c): ONNX via `ort` as default; UDPipe backend is BACKLOG 10; LICENSE added by the user (0856e2c).
 
 ## Next action
 
-1. With the user's M3b answers: record the route and model license in the spec (M3b criteria 1–2) and README, then plan M3b (`plan-M3b.md`) test-first and implement.
+1. Implement M3b from `docs/specs/001-vernier/plan-M3b.md`, starting at T1 (T0 done: 88e806e, plan + ADR 0001 Proposed + onnxruntime/`ORT_DYLIB_PATH` in `devenv.nix`). The implementing agent stopped at T1 (workspace usage exhausted); nothing of T1 was committed. Model for by-hand and `VERNIER_TEST_MODEL` runs: `.sdd/m3b-spike/models/rbeg-onnx/`; spike code: `.sdd/m3b-spike/onnx/src/main.rs`. The user needs a fresh `devenv shell` for the new `devenv.nix`.
+2. Final questions for the user, still open: ADR 0001 accept?; the performance budget was measured on the udpipe route and ONNX misses it (BACKLOG 6), so which numbers bind ONNX?; the GitHub Actions example's install source (`OWNER` placeholder).
 
 ## Known-bad approaches
 
