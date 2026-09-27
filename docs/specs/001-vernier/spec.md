@@ -142,20 +142,20 @@ Count nominalizations (nouns derived from verbs or adjectives) and passive const
 - [x] WHEN a parse contains a token with `deprel` `aux:pass`, THE engine SHALL report its head verb as a passive construction (once per head) with its position: the first character of the verb's form, found by matching the token forms in order against the sentence text, or the sentence's first character when a form is not found.
 - [x] WHEN no parse exists, THE engine SHALL report passive voice as absent, not as zero.
 
-## M5 — Diagnostics, check mode and CI output (Status: PLANNED)
+## M5 — Diagnostics, check mode and CI output (Status: IMPLEMENTED)
 <a id="M5"></a>
 
 Render findings like compiler diagnostics, add JSON and compact output, and make `check` usable as a CI gate.
 
 **Acceptance Criteria:**
 
-- [ ] WHEN a sentence carries at least one flag, THE `check` command SHALL print, in the default `text` format, one `warning[CognitiveOverload]` diagnostic for it. The diagnostic points at the sentence's first character, underlines the sentence over all its lines, and lists every metric that a rule checks (words, mean dependency distance, tree depth, subordinate clauses, center-embedding) with its value, its maximum and the flag it raised; a syntactic metric of an unparsed sentence is listed as `absent (no parse)`.
-- [ ] THE `check` command SHALL exit 0 when no sentence is flagged, 1 when at least one is, and 2 on an unreadable file or an unusable model, in every format (the unusable-model case is exercised once M3b loads models).
-- [ ] WHEN `--format json` is given, THE tool (`analyze` and `check` alike) SHALL print, after all files, one JSON document with `schema_version` 1 and, per readable file, its path, its metrics and a diagnostics array whose positions equal those of the text format.
-- [ ] WHEN `--format compact` is given, THE `check` command SHALL print one line per diagnostic as `path:line:col: code: message`, where the code is `CognitiveOverload` and the message joins the diagnostic's flag messages with `; `.
-- [ ] THE `analyze` command SHALL print per file, in the `text` and `compact` formats, M1's summary line followed by a table of the file-level metrics (one row per metric, `absent` where a metric is absent), and exit 0 whatever the metrics are.
-- [ ] FOR every diagnostic, THE rendered line and column SHALL point at the sentence's first character in the source, and SHALL be the same in the text, compact and JSON formats (property test over generated documents).
-- [ ] THE repository SHALL contain a GitHub Actions example under `docs/examples/` that runs `vernier check` and fails the job on exit 1.
+- [x] WHEN a sentence carries at least one flag, THE `check` command SHALL print, in the default `text` format, one `warning[CognitiveOverload]` diagnostic for it. The diagnostic points at the sentence's first character, underlines the sentence over all its lines, and lists every metric that a rule checks (words, mean dependency distance, tree depth, subordinate clauses, center-embedding) with its value, its maximum and the flag it raised; a syntactic metric of an unparsed sentence is listed as `absent (no parse)`.
+- [x] THE `check` command SHALL exit 0 when no sentence is flagged, 1 when at least one is, and 2 on an unreadable file or an unusable model, in every format (the unusable-model case is exercised once M3b loads models).
+- [x] WHEN `--format json` is given, THE tool (`analyze` and `check` alike) SHALL print, after all files, one JSON document with `schema_version` 1 and, per readable file, its path, its metrics and a diagnostics array whose positions equal those of the text format.
+- [x] WHEN `--format compact` is given, THE `check` command SHALL print one line per diagnostic as `path:line:col: code: message`, where the code is `CognitiveOverload` and the message joins the diagnostic's flag messages with `; `.
+- [x] THE `analyze` command SHALL print per file, in the `text` and `compact` formats, M1's summary line followed by a table of the file-level metrics (one row per metric, `absent` where a metric is absent), and exit 0 whatever the metrics are.
+- [x] FOR every diagnostic, THE rendered line and column SHALL point at the sentence's first character in the source, and SHALL be the same in the text, compact and JSON formats (property test over generated documents).
+- [x] THE repository SHALL contain a GitHub Actions example under `docs/examples/` that runs `vernier check` and fails the job on exit 1.
 
 **Implementation Details:**
 
