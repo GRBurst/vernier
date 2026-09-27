@@ -7,7 +7,7 @@ use std::ops::Range;
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 
 use crate::analysis::{
-    FileAnalysis, Flag, SentenceAnalysis, SentenceSyntax, SyntacticFlag, Thresholds,
+    FileAnalysis, Flag, SentenceAnalysis, SentenceSyntax, SyntacticFlag, Syntax, Thresholds,
 };
 use crate::position::{LineIndex, Position, PositionError};
 
@@ -140,10 +140,10 @@ pub fn metric_lines(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec
         thresholds.max_sentence_len
     );
     let syntactic = match &sentence.syntax {
-        None => ABSENT_WITHOUT_PARSE
+        Syntax::Unparsed => ABSENT_WITHOUT_PARSE
             .map(|name| format!("{name}: absent (no parse)"))
             .to_vec(),
-        Some(syntax) => parsed_lines(syntax, thresholds),
+        Syntax::Parsed(syntax) => parsed_lines(syntax, thresholds),
     };
     std::iter::once(head).chain(syntactic).collect()
 }
@@ -232,7 +232,8 @@ pub fn flag_messages(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Ve
         .map(|flag| surface_message(*flag, sentence, thresholds));
     let syntactic = sentence
         .syntax
-        .iter()
+        .parsed()
+        .into_iter()
         .flat_map(|syntax| syntax.flags.iter())
         .map(|flag| syntactic_message(flag, thresholds));
     surface.chain(syntactic).collect()
@@ -361,7 +362,7 @@ mod tests {
             },
             readability: None,
             flags,
-            syntax: Some(SentenceSyntax {
+            syntax: Syntax::Parsed(SentenceSyntax {
                 metrics,
                 flags: syntactic,
                 passives: Vec::new(),
@@ -503,10 +504,12 @@ mod tests {
                 .then_some(Flag::LongSentence)
                 .into_iter()
                 .collect(),
-            syntax: metrics.map(|metrics| SentenceSyntax {
-                flags: syntactic_flags(&metrics, t),
-                metrics,
-                passives: Vec::new(),
+            syntax: metrics.map_or(Syntax::Unparsed, |metrics| {
+                Syntax::Parsed(SentenceSyntax {
+                    flags: syntactic_flags(&metrics, t),
+                    metrics,
+                    passives: Vec::new(),
+                })
             }),
             nominalizations: NominalizationCount::default(),
         }
@@ -630,11 +633,11 @@ mod tests {
             let lines = metric_lines(&sentence, &t);
             prop_assert_eq!(lines[0].contains("LongSentence"), words > t.max_sentence_len, "{}", lines[0]);
             match &sentence.syntax {
-                None => {
+                Syntax::Unparsed => {
                     prop_assert_eq!(lines.len(), 5);
                     prop_assert!(lines[1..].iter().all(|l| l.ends_with("absent (no parse)")), "{:?}", lines);
                 }
-                Some(syntax) => {
+                Syntax::Parsed(syntax) => {
                     let raised = |name: &str| syntax.flags.iter().any(|f| syntactic_message(f, &t).name == name);
                     prop_assert_eq!(lines[1].contains("HighMdd"), raised("HighMdd"), "{}", lines[1]);
                     prop_assert_eq!(lines[2].contains("DeepTree"), raised("DeepTree"), "{}", lines[2]);

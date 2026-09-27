@@ -59,14 +59,33 @@ pub struct SentenceSyntax {
     pub passives: Vec<Passive>,
 }
 
-/// One sentence's position, counts, scores and flags; `syntax` is `None` when it was not parsed.
+/// What a sentence's parse gave: nothing, because no parser ran, or its syntax.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Syntax {
+    /// No parser ran.
+    Unparsed,
+    /// The parser gave a tree.
+    Parsed(SentenceSyntax),
+}
+
+impl Syntax {
+    /// The syntax of a parsed sentence, `None` otherwise.
+    pub fn parsed(&self) -> Option<&SentenceSyntax> {
+        match self {
+            Self::Parsed(syntax) => Some(syntax),
+            Self::Unparsed => None,
+        }
+    }
+}
+
+/// One sentence's position, counts, scores and flags, and what its parse gave.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SentenceAnalysis {
     pub source_range: Range<usize>,
     pub counts: SurfaceCounts,
     pub readability: Option<Readability>,
     pub flags: Vec<Flag>,
-    pub syntax: Option<SentenceSyntax>,
+    pub syntax: Syntax,
     /// Its nominalizations (surface words without a parse, `NOUN` tokens with one) over its words.
     pub nominalizations: NominalizationCount,
 }
@@ -114,7 +133,7 @@ pub fn analyze_parsed<P: Parser>(
     let file = analyze_with(source, format, thresholds, |sentence, stoplist| {
         parse_sentence(sentence, thresholds, stoplist, parser).map(Some)
     })?;
-    let parsed = file.sentences.iter().filter_map(|s| s.syntax.as_ref());
+    let parsed = file.sentences.iter().filter_map(|s| s.syntax.parsed());
     let dependency_distance = parsed.clone().map(|syntax| syntax.metrics.distance).sum();
     let passives = parsed.map(|syntax| syntax.passives.len()).sum();
     Ok(FileAnalysis {
@@ -170,7 +189,7 @@ fn analyze_with<E>(
             counts,
             readability: readability(counts),
             flags: flags(counts, thresholds),
-            syntax: parsed.map(|p| p.syntax),
+            syntax: parsed.map_or(Syntax::Unparsed, |p| Syntax::Parsed(p.syntax)),
             nominalizations: NominalizationCount {
                 nominalizations,
                 words: counts.words,
@@ -407,7 +426,7 @@ mod tests {
             };
             let file = analyze_parsed(EXAMPLE_TEXT, SourceFormat::Markdown, &t, &parser).unwrap();
             assert_eq!(file.sentences.len(), 1);
-            file.sentences[0].syntax.clone().unwrap().flags
+            file.sentences[0].syntax.parsed().unwrap().flags.clone()
         };
         assert_eq!(
             flags_at(2.5),
@@ -429,7 +448,7 @@ mod tests {
         let source = EXAMPLE_TEXT.replacen("The proposal", "**The proposal**", 1);
         let parser = example_parser(EXAMPLE_TEXT);
         let file = analyze_parsed(&source, SourceFormat::Markdown, &thresholds(25), &parser);
-        let syntax = file.unwrap().sentences[0].syntax.clone().unwrap();
+        let syntax = file.unwrap().sentences[0].syntax.parsed().cloned().unwrap();
         assert!(syntax.flags.contains(&proposal_caused_8()), "{syntax:?}");
     }
 
@@ -546,7 +565,7 @@ mod tests {
         for source in [PASSIVE_TEXT.to_owned(), bold] {
             let file =
                 analyze_parsed(&source, SourceFormat::Markdown, &thresholds(25), &parser).unwrap();
-            let passives = &file.sentences[0].syntax.as_ref().unwrap().passives;
+            let passives = &file.sentences[0].syntax.parsed().unwrap().passives;
             let expected = ["written", "rejected"].map(|verb| Passive {
                 verb: verb.to_owned(),
                 source_offset: source.find(verb).unwrap(),
@@ -611,7 +630,7 @@ mod tests {
                 .sentences
                 .iter()
                 .map(|s| SentenceAnalysis {
-                    syntax: None,
+                    syntax: Syntax::Unparsed,
                     ..s.clone()
                 })
                 .collect(),
@@ -793,10 +812,10 @@ mod tests {
             let parsed = analyze_parsed(&doc, SourceFormat::Markdown, &t, &ChainParser).unwrap();
             prop_assert_eq!(surface_only(&parsed), plain.clone());
             prop_assert_eq!(plain.dependency_distance, None);
-            prop_assert!(plain.sentences.iter().all(|s| s.syntax.is_none()));
+            prop_assert!(plain.sentences.iter().all(|s| s.syntax == Syntax::Unparsed));
             let mut sum = DependencyDistance::default();
             for s in &parsed.sentences {
-                let syntax = s.syntax.as_ref().expect("every sentence is parsed");
+                let syntax = s.syntax.parsed().expect("every sentence is parsed");
                 let text = &doc[s.source_range.clone()];
                 let tree = DependencyTree::new(ChainParser.parse(text).unwrap()).unwrap();
                 prop_assert_eq!(&syntax.metrics, &syntactic_metrics(&tree));
@@ -836,7 +855,7 @@ mod tests {
             let file = analyze_parsed(&doc, SourceFormat::Markdown, &thresholds(25), &PassiveChainParser).unwrap();
             let mut passives = 0;
             for s in &file.sentences {
-                let syntax = s.syntax.as_ref().expect("parsed");
+                let syntax = s.syntax.parsed().expect("parsed");
                 passives += syntax.passives.len();
                 for p in &syntax.passives {
                     prop_assert!(s.source_range.contains(&p.source_offset), "{:?} {:?}", p, s.source_range);
