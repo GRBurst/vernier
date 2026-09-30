@@ -4,3 +4,11 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-print-in-tests = true
+# Audit 023: clap's own printing drops a failed write; vernier writes its help, version and
+# usage errors itself (`Cli::try_parse`, `show_refusal` in src/main.rs).
+disallowed-methods = [
+    { path = "clap::Parser::parse", reason = "prints and exits, dropping a failed write (audit 023); use try_parse" },
+    { path = "clap::Parser::parse_from", reason = "prints and exits, dropping a failed write (audit 023); use try_parse_from" },
+    { path = "clap::error::Error::exit", reason = "prints and exits, dropping a failed write (audit 023); use show_refusal" },
+    { path = "clap::error::Error::print", reason = "prints to a stream vernier does not control (audit 023); use show_refusal" },
+]

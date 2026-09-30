@@ -8,6 +8,8 @@ publish = false
 
 [dependencies]
 annotate-snippets = "0.12"
+# why: clap colours its help and errors through anstream; vernier writes them itself (audit 023).
+anstream = "1"
 clap = { version = "4", features = ["derive"] }
 # why: ONNX Runtime is loaded at run time (dlopen), only with --model-path; ADR 0001.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic"] }

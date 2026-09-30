@@ -3,6 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use clap::Parser;
+use vernier::cli::Cli;
 use vernier::prose::SourceFormat;
 use vernier::summary::{FileSummary, render, summarize};
 
@@ -843,6 +845,125 @@ fn a_closed_descriptor_reads_as_dev_null() {
         }
     }
 }
+
+/// A stdout whose every write fails: a pipe whose reader has gone, and `/dev/full`, each with the
+/// cause a write to it gives.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn failing_stdouts() -> [(std::io::Error, Stdio); 2] {
+    let [(_, pipe), (_, full)] = failing_stderrs();
+    [
+        (std::io::Error::from_raw_os_error(EPIPE), pipe),
+        (std::io::Error::from_raw_os_error(ENOSPC), full),
+    ]
+}
+
+/// Linux's `ENOSPC`: the error of a write to `/dev/full`.
+const ENOSPC: i32 = 28;
+
+/// The command lines on which clap shows its help or the version on stdout.
+const HELP_AND_VERSION: [&[&str]; 8] = [
+    &["--help"],
+    &["-h"],
+    &["check", "--help"],
+    &["analyze", "-h"],
+    &["help"],
+    &["help", "check"],
+    &["--version"],
+    &["-V"],
+];
+
+/// Given each command line that shows the help or the version, and a stdout that refuses every
+/// write (a pipe whose reader has gone, or `/dev/full`)
+/// When `vernier` runs with it
+/// Then it exits 2 without a panic and says so in exactly one stderr line,
+/// `vernier: cannot write to stdout: <cause>` (M5 2)
+#[test]
+fn help_or_version_into_a_failed_stdout_exits_2() {
+    for args in HELP_AND_VERSION {
+        for (cause, sink) in failing_stdouts() {
+            let out = Command::new(env!("CARGO_BIN_EXE_vernier"))
+                .args(args)
+                .stdout(sink)
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(2), "{args:?} {cause}: {stderr}");
+            assert_eq!(
+                stderr,
+                format!("vernier: cannot write to stdout: {cause}\n"),
+                "{args:?}"
+            );
+        }
+    }
+}
+
+/// Given each command line that shows the help or the version, and a working stdout (a pipe)
+/// When `vernier` runs with it, with `CLICOLOR_FORCE` unset and set to 1
+/// Then it exits 0 with clap's rendering of it on stdout, uncoloured off a terminal and in clap's
+/// colours where anstream's choice (the one clap's own printing makes) forces them, and nothing
+/// on stderr (M5 8)
+#[test]
+fn help_or_version_is_clap_s_text() {
+    for args in HELP_AND_VERSION {
+        let rendered = Cli::try_parse_from([&["vernier"], args].concat())
+            .unwrap_err()
+            .render();
+        for (force, expected) in [
+            (None, rendered.to_string()),
+            (Some("1"), rendered.ansi().to_string()),
+        ] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_vernier"));
+            command.args(args).env_remove("CLICOLOR_FORCE");
+            if let Some(value) = force {
+                command.env("CLICOLOR_FORCE", value);
+            }
+            let out = command.output().unwrap();
+            assert_eq!(out.status.code(), Some(0), "{args:?} {force:?}");
+            assert_eq!(
+                String::from_utf8(out.stdout).unwrap(),
+                expected,
+                "{args:?} {force:?}"
+            );
+            assert!(out.stderr.is_empty(), "{args:?} {force:?}");
+        }
+    }
+}
+
+/// Given command lines clap refuses, and a stderr that works (a pipe) or refuses every write
+/// When `vernier` runs with each
+/// Then it exits 2 without a panic, and a working stderr holds clap's rendering of the error,
+/// uncoloured off a terminal (M5 2)
+#[test]
+fn a_usage_error_is_clap_s_text_on_stderr() {
+    for args in USAGE_ERRORS {
+        let out = vernier(args, &[]);
+        let rendered = Cli::try_parse_from([&["vernier"], args].concat())
+            .unwrap_err()
+            .render()
+            .to_string();
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert_eq!(String::from_utf8(out.stderr).unwrap(), rendered, "{args:?}");
+        for (stderr, sink) in failing_stderrs() {
+            let out = Command::new(env!("CARGO_BIN_EXE_vernier"))
+                .args(args)
+                .stderr(sink)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(2), "{args:?} {stderr}");
+            assert!(out.stdout.is_empty(), "{args:?} {stderr}");
+        }
+    }
+}
+
+/// Command lines clap refuses (`vernier` alone shows the help on stderr, as a usage error).
+const USAGE_ERRORS: [&[&str]; 5] = [
+    &["check"],
+    &["check", "--format", "xml", "x.md"],
+    &["check", "--max-mdd", "0", "x.md"],
+    &["analyze", "--no-such-flag", "x.md"],
+    &[],
+];
 
 /// Given command lines clap refuses: a command without files, an unknown format, a `--max-mdd`
 /// of 0, an unknown flag, no command

@@ -7,6 +7,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use anstream::{AutoStream, ColorChoice};
 use clap::Parser;
 use vernier::analysis::{self, AnalysisError, FileAnalysis, Syntax, Thresholds};
 use vernier::cli::{Args, Cli, Command, OutputFormat};
@@ -22,12 +23,23 @@ use vernier::summary::{FileSummary, render, summarize, with_parse};
 const EXIT_CLEAN: u8 = 0;
 /// Exit code when a sentence is flagged (spec 001 M5).
 const EXIT_FLAGGED: u8 = 1;
-/// Exit code for an unreadable file, an unusable model, a sentence that cannot be parsed, or a
-/// failed write to stdout (spec 001 M1, M5).
+/// Exit code for an unreadable file, an unusable model, a sentence that cannot be parsed, a
+/// failed write to stdout, or a usage error (spec 001 M1, M5).
 const EXIT_UNREADABLE: u8 = 2;
 
 fn main() -> ExitCode {
-    let (args, mode) = match Cli::parse().command {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(refused) => {
+            // why: clap's own printing colours by the stream's choice (anstream's `Auto`) and
+            // drops a failed write; the same streams keep its rendering, and a failed stdout
+            // write is reported (M5 criterion 2).
+            let mut out = AutoStream::new(io::stdout().lock(), ColorChoice::Auto);
+            let mut err = AutoStream::new(io::stderr().lock(), ColorChoice::Auto);
+            return ExitCode::from(show_refusal(&refused, &mut out, &mut err));
+        }
+    };
+    let (args, mode) = match cli.command {
         Command::Analyze(args) => (args, Mode::Analyze),
         Command::Check(args) => (args, Mode::Check),
     };
@@ -50,6 +62,28 @@ fn main() -> ExitCode {
         &mut err,
     );
     ExitCode::from(code)
+}
+
+/// Shows clap's refusal to run, rendered as clap renders it: a help or the version on `out`
+/// (stdout), exit 0, or exit 2 with `vernier: cannot write to stdout: <cause>` on `err` when that
+/// write fails; a usage error on `err` (stderr), exit 2, a failed write dropped as `say` does.
+fn show_refusal<W: Write, E: Write>(refused: &clap::Error, out: &mut W, err: &mut E) -> u8 {
+    let text = refused.render();
+    if refused.use_stderr() {
+        // why: as in `say`, a usage error that cannot be written cannot be reported either.
+        let _unreported = write!(err, "{}", text.ansi()).and_then(|()| err.flush());
+        return EXIT_UNREADABLE;
+    }
+    match write!(out, "{}", text.ansi()).and_then(|()| out.flush()) {
+        Ok(()) => EXIT_CLEAN,
+        Err(failure) => {
+            say(
+                err,
+                format_args!("vernier: cannot write to stdout: {failure}"),
+            );
+            EXIT_UNREADABLE
+        }
+    }
 }
 
 /// Says `message` as one line on `err` (stderr). A failed write is dropped: stderr is where it
@@ -532,6 +566,58 @@ mod tests {
                     "{command} {format}"
                 );
             }
+        }
+    }
+
+    /// Clap's refusal of `line`: its help, the version, or a usage error.
+    // why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+    #[allow(clippy::unwrap_used)]
+    fn refusal(line: &[&str]) -> clap::Error {
+        Cli::try_parse_from([&["vernier"], line].concat()).unwrap_err()
+    }
+
+    /// Given clap's help and version for `vernier`, and a stdout that takes every write or refuses
+    /// every write
+    /// When the refusal is shown
+    /// Then a working stdout gets clap's rendering exactly and the exit code is 0, while a refusing
+    /// one gives exit 2 and exactly one stderr line, `vernier: cannot write to stdout: <cause>`
+    /// (M5 criterion 2)
+    #[test]
+    fn help_or_version_is_written_through_the_fallible_stdout() {
+        let cause = io::Error::from(io::ErrorKind::BrokenPipe);
+        for line in [&["--help"][..], &["check", "-h"], &["--version"]] {
+            let refused = refusal(line);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            assert_eq!(show_refusal(&refused, &mut out, &mut err), EXIT_CLEAN);
+            assert_eq!(out, refused.render().ansi().to_string().into_bytes());
+            assert!(err.is_empty(), "{line:?}");
+            let mut err = Vec::new();
+            let code = show_refusal(&refused, &mut ClosedPipe, &mut err);
+            assert_eq!(code, EXIT_UNREADABLE, "{line:?}");
+            assert_eq!(
+                String::from_utf8(err).unwrap(),
+                format!("vernier: cannot write to stdout: {cause}\n"),
+                "{line:?}"
+            );
+        }
+    }
+
+    /// Given usage errors clap refuses, and a stderr that takes every write or refuses every write
+    /// When the refusal is shown
+    /// Then it exits 2 either way, with clap's rendering exactly on a working stderr and nothing
+    /// on stdout (M5 criterion 2)
+    #[test]
+    fn a_usage_error_is_written_through_the_fallible_stderr() {
+        for line in [&["check"][..], &["check", "--max-mdd", "0", "x.md"], &[]] {
+            let refused = refusal(line);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            assert_eq!(show_refusal(&refused, &mut out, &mut err), EXIT_UNREADABLE);
+            assert!(out.is_empty(), "{line:?}");
+            assert_eq!(err, refused.render().ansi().to_string().into_bytes());
+            let mut out = Vec::new();
+            let code = show_refusal(&refused, &mut out, &mut ClosedPipe);
+            assert_eq!(code, EXIT_UNREADABLE, "{line:?}");
+            assert!(out.is_empty(), "{line:?}");
         }
     }
 
