@@ -669,3 +669,61 @@ fn analyze_prints_the_table_in_compact_too() {
         String::from_utf8(text).unwrap()
     );
 }
+
+/// Runs `vernier` with its stdout on a pipe whose read end is already closed, so every write to
+/// stdout fails (a broken pipe, as under `| head -1`).
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn vernier_into_a_closed_pipe(args: &[&str], files: &[&Path]) -> Output {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    Command::new(env!("CARGO_BIN_EXE_vernier"))
+        .args(args)
+        .args(files)
+        .stdout(writer)
+        .output()
+        .unwrap()
+}
+
+/// Given the long-sentence file, which every command and format writes something for, and a
+/// stdout whose reader has gone
+/// When `analyze` and `check` run in each format
+/// Then each exits 2 without panicking, and says so in at most one stderr line besides the
+/// no-model notice (M5 2)
+#[test]
+fn a_closed_stdout_exits_2_without_a_panic() {
+    let long = fixture("long.md");
+    for command in ["analyze", "check"] {
+        for format in ["text", "compact", "json"] {
+            let out = vernier_into_a_closed_pipe(&[command, "--format", format], &[&long, &long]);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(2), "{command} {format}: {stderr}");
+            assert!(!stderr.contains("panicked"), "{command} {format}: {stderr}");
+            let others = stderr.lines().filter(|line| *line != NO_MODEL).count();
+            assert!(others <= 1, "{command} {format}: {stderr}");
+        }
+    }
+}
+
+/// Given command lines clap refuses: a command without files, an unknown format, a `--max-mdd`
+/// of 0, an unknown flag, no command
+/// When `vernier` runs with each
+/// Then it exits 2, prints nothing on stdout and says why on stderr (M5 2)
+#[test]
+fn a_usage_error_exits_2() {
+    let sample = fixture("sample.md");
+    let sample = sample.to_str().unwrap_or_default();
+    for args in [
+        vec!["check"],
+        vec!["analyze"],
+        vec!["check", "--format", "xml", sample],
+        vec!["check", "--max-mdd", "0", sample],
+        vec!["analyze", "--no-such-flag", sample],
+        vec![],
+    ] {
+        let out = vernier(&args, &[]);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert!(!out.stderr.is_empty(), "{args:?}");
+    }
+}

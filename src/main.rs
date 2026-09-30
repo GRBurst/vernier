@@ -2,7 +2,7 @@
 //!
 //! The imperative shell: read files, call the pure core, print, and map the outcome to an exit code.
 
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -17,16 +17,29 @@ use vernier::position::{LineIndex, Position, PositionError};
 use vernier::prose::SourceFormat;
 use vernier::summary::{FileSummary, render, summarize, with_parse};
 
+/// Exit code when every file was reported and, for `check`, no sentence was flagged.
+const EXIT_CLEAN: u8 = 0;
 /// Exit code when a sentence is flagged (spec 001 M5).
 const EXIT_FLAGGED: u8 = 1;
-/// Exit code for an unreadable file or an unusable model (spec 001 M1, M5).
+/// Exit code for an unreadable file, an unusable model, a sentence that cannot be parsed, or a
+/// failed write to stdout (spec 001 M1, M5).
 const EXIT_UNREADABLE: u8 = 2;
 
 fn main() -> ExitCode {
-    match Cli::parse().command {
-        Command::Analyze(args) => run(&args, Mode::Analyze),
-        Command::Check(args) => run(&args, Mode::Check),
-    }
+    let (args, mode) = match Cli::parse().command {
+        Command::Analyze(args) => (args, Mode::Analyze),
+        Command::Check(args) => (args, Mode::Check),
+    };
+    let mut parser = match load_parser(args.model_path.as_deref()) {
+        Ok(parser) => parser,
+        Err(code) => return code,
+    };
+    let stdout = std::io::stdout();
+    let style = Style::for_output(
+        stdout.is_terminal(),
+        std::env::var_os("NO_COLOR").as_deref(),
+    );
+    ExitCode::from(run(&args, mode, parser.as_mut(), style, &mut stdout.lock()))
 }
 
 /// Which command runs: `analyze` reports, `check` lints.
@@ -65,30 +78,63 @@ enum ExamineError<E: std::error::Error> {
     Parse(AnalysisError<E>),
 }
 
-/// Loads the model once (exit 2, no file processed, if it cannot be loaded), processes every
-/// file, prints the JSON document after the last one when `--format json`, then exits 2 if any
-/// file was unreadable (or the document could not be written), else 1 if `check` flagged a
-/// sentence, else 0.
-fn run(args: &Args, mode: Mode) -> ExitCode {
-    let mut parser = match load_parser(args.model_path.as_deref()) {
-        Ok(parser) => parser,
-        Err(code) => return code,
-    };
-    let mut reports = Vec::new();
-    let mut outcomes: Vec<FileOutcome> = args
-        .files
-        .iter()
-        .map(|path| process(args, mode, path, parser.as_mut(), &mut reports))
-        .collect();
-    if args.format == OutputFormat::Json && !print_document(&reports) {
-        outcomes.push(FileOutcome::Unreadable);
+/// Processes every file, writing to `out`, and the JSON document after the last one when
+/// `--format json`; the exit code is 2 if any file was unreadable (or the document could not be
+/// serialized), else 1 if `check` flagged a sentence, else 0. The first write to `out` that fails
+/// (a closed pipe) is said once on stderr and ends the run with 2.
+fn run<P: SentenceParser, W: Write>(
+    args: &Args,
+    mode: Mode,
+    mut parser: Option<&mut P>,
+    style: Style,
+    out: &mut W,
+) -> u8 {
+    match write_all(args, mode, &mut parser, style, out) {
+        Ok(outcomes) => exit_code(&outcomes),
+        Err(err) => {
+            eprintln!("vernier: cannot write to stdout: {err}");
+            EXIT_UNREADABLE
+        }
     }
+}
+
+/// Every file's outcome, with its report written to `out` (the JSON document after the last
+/// file), or the first failed write.
+fn write_all<P: SentenceParser, W: Write>(
+    args: &Args,
+    mode: Mode,
+    parser: &mut Option<&mut P>,
+    style: Style,
+    out: &mut W,
+) -> io::Result<Vec<FileOutcome>> {
+    let mut reports = Vec::new();
+    let mut outcomes = Vec::with_capacity(args.files.len() + 1);
+    for path in &args.files {
+        let (outcome, read) = process(args, mode, path, parser.as_deref_mut());
+        match (args.format, read) {
+            (_, None) => {}
+            (OutputFormat::Json, Some((_, report))) => reports.push(report),
+            (OutputFormat::Text | OutputFormat::Compact, Some((source, report))) => {
+                print_report(args.format, mode, &source, &report, style, out)?;
+            }
+        }
+        outcomes.push(outcome);
+    }
+    if args.format == OutputFormat::Json {
+        outcomes.push(print_document(&reports, out)?);
+    }
+    out.flush()?;
+    Ok(outcomes)
+}
+
+/// 2 if any file was unreadable, else 1 if one was flagged, else 0.
+fn exit_code(outcomes: &[FileOutcome]) -> u8 {
     if outcomes.contains(&FileOutcome::Unreadable) {
-        ExitCode::from(EXIT_UNREADABLE)
+        EXIT_UNREADABLE
     } else if outcomes.contains(&FileOutcome::Flagged) {
-        ExitCode::from(EXIT_FLAGGED)
+        EXIT_FLAGGED
     } else {
-        ExitCode::SUCCESS
+        EXIT_CLEAN
     }
 }
 
@@ -112,28 +158,27 @@ fn load_parser(model_path: Option<&Path>) -> Result<Option<OnnxParser>, ExitCode
     }
 }
 
-/// Reads and reports one file, or names it on stderr when it cannot be read (or is not UTF-8)
-/// or a sentence cannot be parsed. Its report is printed now, or kept in `reports` for the JSON
-/// document; each sentence too long for the model gets a notice on stderr.
-fn process(
+/// Reads and examines one file: its outcome and, when it can be reported, its source and report.
+/// A file that cannot be read (or is not UTF-8), or holds a sentence that cannot be parsed, is
+/// named on stderr and not reported; each sentence too long for the model gets a notice on stderr.
+fn process<P: SentenceParser>(
     args: &Args,
     mode: Mode,
     path: &Path,
-    parser: Option<&mut OnnxParser>,
-    reports: &mut Vec<Report>,
-) -> FileOutcome {
+    parser: Option<&mut P>,
+) -> (FileOutcome, Option<(String, Report)>) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(err) => {
             eprintln!("vernier: cannot read {}: {err}", path.display());
-            return FileOutcome::Unreadable;
+            return (FileOutcome::Unreadable, None);
         }
     };
     let report = match examine(args, path, &source, parser) {
         Ok(report) => report,
         Err(err) => {
             eprintln!("vernier: {}", failure(path, &source, &err));
-            return FileOutcome::Unreadable;
+            return (FileOutcome::Unreadable, None);
         }
     };
     for skipped in &report.too_long {
@@ -143,13 +188,7 @@ fn process(
         Mode::Check if !report.diagnostics.is_empty() => FileOutcome::Flagged,
         Mode::Analyze | Mode::Check => FileOutcome::Clean,
     };
-    match args.format {
-        OutputFormat::Json => reports.push(report),
-        OutputFormat::Text | OutputFormat::Compact => {
-            print_report(args.format, mode, &source, &report)
-        }
-    }
-    outcome
+    (outcome, Some((source, report)))
 }
 
 /// The summary and the diagnostics of one file under the command line's thresholds, with every
@@ -249,30 +288,37 @@ fn failure<E: std::error::Error>(path: &Path, source: &str, err: &ExamineError<E
     )
 }
 
-/// `analyze`: the file's table. `check`: one annotated block (text) or line (compact) per diagnostic.
-fn print_report(format: OutputFormat, mode: Mode, source: &str, report: &Report) {
+/// `analyze`: the file's table. `check`: one annotated block (text) or line (compact) per
+/// diagnostic. Written to `out`, which may fail (a closed pipe).
+fn print_report<W: Write>(
+    format: OutputFormat,
+    mode: Mode,
+    source: &str,
+    report: &Report,
+    style: Style,
+    out: &mut W,
+) -> io::Result<()> {
     let path = report.path.display().to_string();
     match (mode, format) {
-        (Mode::Analyze, _) => println!("{}", render(&report.path, &report.summary)),
+        (Mode::Analyze, _) => writeln!(out, "{}", render(&report.path, &report.summary)),
         (Mode::Check, OutputFormat::Compact) => report
             .diagnostics
             .iter()
-            .for_each(|d| println!("{}", diagnostic::render_compact(&path, d))),
-        (Mode::Check, OutputFormat::Json) => {} // printed once, after the last file
-        (Mode::Check, OutputFormat::Text) => {
-            let style = Style::for_output(
-                std::io::stdout().is_terminal(),
-                std::env::var_os("NO_COLOR").as_deref(),
-            );
-            report.diagnostics.iter().for_each(|d| {
-                println!("{}\n", diagnostic::render_text(&path, source, d, style));
-            });
-        }
+            .try_for_each(|d| writeln!(out, "{}", diagnostic::render_compact(&path, d))),
+        (Mode::Check, OutputFormat::Json) => Ok(()), // written once, after the last file
+        (Mode::Check, OutputFormat::Text) => report.diagnostics.iter().try_for_each(|d| {
+            writeln!(
+                out,
+                "{}\n",
+                diagnostic::render_text(&path, source, d, style)
+            )
+        }),
     }
 }
 
-/// Prints the JSON document of `reports`, or names the failure on stderr; true when printed.
-fn print_document(reports: &[Report]) -> bool {
+/// Writes the JSON document of `reports` to `out`: `Clean` when written, `Unreadable` (named on
+/// stderr) when it cannot be serialized, or the failed write.
+fn print_document<W: Write>(reports: &[Report], out: &mut W) -> io::Result<FileOutcome> {
     let files: Vec<FileReport<'_>> = reports
         .iter()
         .map(|r| FileReport {
@@ -282,13 +328,10 @@ fn print_document(reports: &[Report]) -> bool {
         })
         .collect();
     match json::document(&files) {
-        Ok(document) => {
-            println!("{document}");
-            true
-        }
+        Ok(document) => writeln!(out, "{document}").map(|()| FileOutcome::Clean),
         Err(err) => {
             eprintln!("vernier: cannot write the JSON document: {err}");
-            false
+            Ok(FileOutcome::Unreadable)
         }
     }
 }
@@ -336,6 +379,103 @@ mod tests {
     }
 
     const SOURCE: &str = "# Title\n\nOne two three. Four five six.\n\n- Seven eight.\n";
+
+    /// The command, format and files of a command line, with the default thresholds.
+    // why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+    #[allow(clippy::unwrap_used)]
+    fn command_line(command: &str, format: &str, files: &[&Path]) -> (Args, Mode) {
+        let line = ["vernier", command, "--format", format]
+            .map(std::ffi::OsString::from)
+            .into_iter()
+            .chain(files.iter().map(|f| f.as_os_str().to_owned()));
+        match Cli::try_parse_from(line).unwrap().command {
+            Command::Analyze(args) => (args, Mode::Analyze),
+            Command::Check(args) => (args, Mode::Check),
+        }
+    }
+
+    /// A committed fixture of the integration tests.
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name)
+    }
+
+    /// A stdout whose every write fails, as a pipe whose reader has gone.
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    const FORMATS: [&str; 3] = ["text", "compact", "json"];
+
+    /// Given a readable file whose first sentence the parser fails on
+    /// When `analyze` and `check` run on it in each format
+    /// Then the run exits 2 and the file is not reported: nothing on stdout, where JSON lists no
+    /// file (M5 criterion 2)
+    #[test]
+    fn a_sentence_that_cannot_be_parsed_exits_2() {
+        for command in ["analyze", "check"] {
+            for format in FORMATS {
+                let (args, mode) = command_line(command, format, &[&fixture("sample.md")]);
+                let mut failing = CountingParser {
+                    pieces: 0,
+                    calls: 0,
+                };
+                let mut out = Vec::new();
+                let code = run(&args, mode, Some(&mut failing), Style::Plain, &mut out);
+                assert_eq!(code, EXIT_UNREADABLE, "{command} {format}");
+                assert_eq!(failing.calls, 1, "{command} {format}");
+                let stdout = String::from_utf8(out).unwrap();
+                match format {
+                    "json" => {
+                        let doc: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+                        assert_eq!(doc["files"], serde_json::json!([]), "{command}");
+                    }
+                    _ => assert_eq!(stdout, "", "{command} {format}"),
+                }
+            }
+        }
+    }
+
+    /// Given a readable file every command and format writes something for, and a stdout that
+    /// refuses every write
+    /// When `analyze` and `check` run in each format
+    /// Then the run exits 2 instead of 0 or 1 (M5 criterion 2)
+    #[test]
+    fn a_failed_write_exits_2() {
+        for command in ["analyze", "check"] {
+            for format in FORMATS {
+                let (args, mode) = command_line(command, format, &[&fixture("long.md")]);
+                let code =
+                    run::<CountingParser, _>(&args, mode, None, Style::Plain, &mut ClosedPipe);
+                assert_eq!(code, EXIT_UNREADABLE, "{command} {format}");
+            }
+        }
+    }
+
+    /// Given the long-sentence file and a stdout that takes every write
+    /// When `analyze` and `check` run on it without a model
+    /// Then analyze exits 0 and check 1: the writer is not what decides (witness for the above)
+    #[test]
+    fn a_working_stdout_keeps_the_exit_code() {
+        for (command, expected) in [("analyze", EXIT_CLEAN), ("check", EXIT_FLAGGED)] {
+            for format in FORMATS {
+                let (args, mode) = command_line(command, format, &[&fixture("long.md")]);
+                let mut out = Vec::new();
+                let code = run::<CountingParser, _>(&args, mode, None, Style::Plain, &mut out);
+                assert_eq!(code, expected, "{command} {format}");
+                assert!(!out.is_empty(), "{command} {format}");
+            }
+        }
+    }
 
     /// Given a file of three sentences and a parser that counts its calls
     /// When the file is examined as by a whole run
