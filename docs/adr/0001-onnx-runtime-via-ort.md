@@ -1,6 +1,6 @@
 # ADR 0001 — ONNX Runtime as a native dependency, through `ort`
 
-**Status:** Proposed
+**Status:** Accepted (by the user, 2026-09-30)
 **Date:** 2026-09-27
 **Spec:** [001 M3b](../specs/001-vernier/spec.md#M3b), plan [plan-M3b.md](../specs/001-vernier/plan-M3b.md)
 

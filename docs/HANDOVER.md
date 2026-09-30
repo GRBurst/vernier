@@ -53,7 +53,7 @@
   - `tests/positions.rs`: text, compact and JSON give the same line/column, at the sentence's first character. `docs/examples/github-actions.yml` + `tests/examples.rs`.
   - Audit 010: serde_json's default parser does not round-trip floats; tests read with the dev-only `float_roundtrip` feature.
   - Changed tests (layout only, stated in the plan): three exact-line `check` tests run with `--format compact`; analyze/summary tests read table rows; main's per-flag-lines test removed (law kept in `diagnostic::one_diagnostic_per_flagged_sentence_with_all_its_flags`).
-- **M3b IMPLEMENTED** (route chosen by the user: ONNX via `ort`, 3d31b3c; plan `docs/specs/001-vernier/plan-M3b.md`, commits 88e806e..3d4f852; ADR `docs/adr/0001-onnx-runtime-via-ort.md` **Proposed**):
+- **M3b IMPLEMENTED** (route chosen by the user: ONNX via `ort`, 3d31b3c; plan `docs/specs/001-vernier/plan-M3b.md`, commits 88e806e..3d4f852; ADR `docs/adr/0001-onnx-runtime-via-ort.md` Accepted by the user 2026-09-30):
   - `src/mst.rs` Chu-Liu/Edmonds; `src/decoder.rs` labels, masked batch, length rule (n ≤ 509 pieces, read from `config.json`), goeswith, single-root fix plus a strict second pass (ud.py's fix leaves 2 roots in 12,073 of 3.06M multi-root cases), subword merge; `src/onnx.rs` `OnnxParser` (files checked before the runtime loads; `ort::init_from` because ort's implicit load panics; 16-row chunks, output identical to one batch).
   - Seams: `Parser::parse(&mut self) -> Parse { Tokens, TooLong }`; `Syntax { Unparsed, TooLong, Parsed }`; `AnalysisError::Parse` carries the sentence start. M4 parse lemma `_` falls back to `surface_lemma`.
   - CLI: `--model-path DIR` fills MDD/passives, syntactic flags and `= metrics:`; without it one stderr notice; missing/unusable model or runtime → named on stderr, exit 2; too-long sentence → one stderr notice, lines read `absent (too long for the model)`.
@@ -104,13 +104,12 @@ VERNIER_TEST_MODEL=$PWD/.sdd/m3b-spike/models/rbeg-onnx cargo test --release --t
 - M3a decisions to confirm (plan-M3a "Decisions made"): a content token with only `PUNCT` ancestors becomes a projected root; `words_between` counts tokens whose form has a letter or digit; the subject's head is not required to be a `VERB`.
 - M4 candidate stoplist additions (see above); decide on real prose, not by guess.
 - M3b decided by the user 2026-09-27 (3d31b3c): ONNX via `ort` as default; UDPipe backend is BACKLOG 10; LICENSE added by the user (0856e2c).
-- ADR 0001 is Proposed: the user accepts or rejects it.
+- User answers 2026-09-30: ADR 0001 accepted; performance baseline recorded, not a gate (`measurements/performance-baseline.md`, BACKLOG 6); the CI example installs from `github.com/GRBurst/vernier`.
 - `just spec-check <file>` on a non-spec file (plan, audit) fails its title rule; the hook's default run checks specs only. Expected, not friction.
 
 ## Next action
 
-1. All milestones of spec 001 are IMPLEMENTED. Put the open questions to the user: ADR 0001 accept?; the performance budget (measured on udpipe; ONNX misses it: which numbers bind ONNX, and should the 1.4× gap to the spike be investigated now); the GitHub Actions example's install source (`OWNER` placeholder).
-2. Then phase 2 for spec 001 (BACKLOG 2: Review, Spec-Approval, Comprehension) and the user's by-hand review → `DONE`.
+1. Phase 2 for spec 001, chosen by the user 2026-09-30 (BACKLOG 2: Review, Spec-Approval, Comprehension) and the user's by-hand review → `DONE`.
 
 ## Known-bad approaches
 
