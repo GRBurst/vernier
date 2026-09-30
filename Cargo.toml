@@ -32,6 +32,8 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
+# Audit 016: stdout is written through a fallible writer; `println!` panics on a closed pipe.
+print_stdout = "deny"
 
 [dev-dependencies]
 proptest = "1"

@@ -13,6 +13,9 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// The model directory of `VERNIER_TEST_MODEL`, or `None` after printing why the test is skipped.
+// why: a test helper that says why its test is skipped; allow-print-in-tests covers only
+// `#[test]` items (audit 003).
+#[allow(clippy::print_stdout)]
 fn model() -> Option<OsString> {
     let model = std::env::var_os("VERNIER_TEST_MODEL");
     if model.is_none() {
