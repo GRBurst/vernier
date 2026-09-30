@@ -1,11 +1,11 @@
 # vernier
 
 Readability and syntactic-complexity analyzer for Markdown, written in Rust.
-Status: spec 001 is a draft. M1 (prose extraction) and M2 (sentences, syllables, Flesch Reading Ease, Flesch-Kincaid Grade, Gunning Fog, `check` flags `LongSentence`) are implemented. M3a (mean dependency distance, tree depth, clause count and center-embedding, computed from a UD parse; no parser is wired to the command line until M3b) is implemented too, and so is M4 (nominalization ratio; passive voice from a parse, reported absent without one), and M5 (compiler-style diagnostics, `--format text|compact|json`). M3b wires in a UD parser (ONNX via `ort`, chosen from `docs/specs/001-vernier/research/m3b-parser-spike.md`): with `--model-path` vernier also reports mean dependency distance, tree depth, subordinate clauses, center-embedding and passive voice. See `docs/HANDOVER.md`.
+Status: spec 001 is a draft. M1 (prose extraction) and M2 (sentences, syllables, Flesch Reading Ease, Flesch-Kincaid Grade, Gunning Fog, `check` flags `LongSentence`) are implemented. M3a (mean dependency distance, tree depth, clause count and center-embedding from a UD parse), M3b (the parser: ONNX via `ort`, chosen from `docs/specs/001-vernier/research/m3b-parser-spike.md`), M4 (nominalization ratio; passive voice from a parse) and M5 (compiler-style diagnostics, `--format text|compact|json`) are implemented too. With `--model-path` vernier also reports the syntactic metrics and passive voice; a metric it cannot compute reads `absent (<reason>)`: `no parse`, `too long for the model` or `no content dependency`. The spec is in its review phase (`docs/specs/001-vernier/gates.md`). See `docs/HANDOVER.md`.
 
 ```sh
 vernier analyze README.md                  # per file: M1 line + metric table; exit 0
-vernier check README.md                    # warning[CognitiveOverload] per flagged sentence; exit 1 if any, 2 if a file is unreadable
+vernier check README.md                    # warning[CognitiveOverload] per flagged sentence; exit 1 if any; 2 (wins) if a file is unreadable, the model cannot load or a sentence cannot be parsed
 vernier check --format compact README.md   # path:line:col: CognitiveOverload: LongSentence: …
 vernier check --format json README.md      # one JSON document, schema_version 1
 ```

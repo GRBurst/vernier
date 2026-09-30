@@ -36,7 +36,7 @@
   - `data/nominalization-stoplist.txt` (pybiber seed + research false positives) and its MIT notice.
   - `src/nominalization.rs`: `Stoplist::committed()`, `surface_lemma` (possessive, then `-ies`→`-y` or one final `-s`), `is_nominalization`, surface/parsed counts, the `NominalizationCount` monoid (`ratio()` is `None` without words).
   - `src/passive.rs`: `passive_heads`, `align` (forms in order; at the cursor, else at the next word start; a miss costs one position).
-  - `analysis.rs`: `SentenceAnalysis.nominalizations` is the effective count (surface words without a parse, `NOUN` lemmas with one); `SentenceSyntax.passives`; `FileAnalysis.passives` is `None` without a parse. `summary` prints a fourth line: `nominalization ratio 0.286 (4 of 14 words), passive voice absent (no parse)`.
+  - `analysis.rs`: `SentenceAnalysis.nominalizations` is the effective count (surface words without a parse, `NOUN` lemmas with one); `SentenceSyntax.passives`; `FileAnalysis.passives` is `None` without a parse. `summary` prints a fourth line: `nominalization ratio 0.286 (4 of 14 words), passive voice absent (no parse)` (since M5 a table row; since audit 014 passive voice is absent whenever no sentence was parsed).
   - Spec fixed in place: the `-ies` lemma (audit 007) and possessives (audit 008). Plan fixed: alignment after a substituted form (audit 009, with a documented one-offset limit).
   - Changed tests (layout only): `tests/cli.rs analyze_prints_surface_metrics` expects 8 lines with a stride of 4; summary's two full-render witnesses gain line 4; M3a P14's parse-only eraser also resets `passives`.
   - A by-hand run gave README 5/117, spec 46/2107. Candidate stoplist additions for later: `segment`, maybe `distance`, `evidence`, `density`, `reference`.
@@ -47,7 +47,7 @@
   - `udpipe-rs` hard-wires its tokenizer (1/50 sentences re-split into an invalid tree); one-line fix in its Rust wrapper. Its `ureq`/`rustls`/`ring` dependency is mandatory but unused in the binary.
   - Recommendation: udpipe with a presegmented patch. Budget proposal (BACKLOG 6): load ≤ 2.5 s, p95 ≤ 50 ms per sentence, ≤ 1.5 s per 1000 words, RSS ≤ 200 MiB, as a measurement, not a gate.
 - **M5 IMPLEMENTED** (plan `docs/specs/001-vernier/plan-M5.md`, commits b6eb32e..9153c4e; spike `research/m5-rendering-spike.md`):
-  - `src/diagnostic.rs`: `FlagMessage`, `Diagnostic` (one per flagged sentence, start/end positions), compact render, annotate-snippets render (`Style` Plain/Color; colour only on a TTY without `NO_COLOR`; `term_width` huge so long lines are never elided), `= metrics:` lines (words, MDD, depth, clauses, center-embedding; `absent (no parse)`).
+  - `src/diagnostic.rs`: `FlagMessage`, `Diagnostic` (one per flagged sentence, start/end positions), compact render, annotate-snippets render (`Style` Plain/Color; colour only on a TTY without `NO_COLOR`; `term_width` huge so long lines are never elided), `= metrics:` lines (words, MDD, depth, clauses, center-embedding; `absent (no parse)`, since audit 015 also `absent (no content dependency)` / `absent (too long for the model)` from the typed `analysis::Absence`).
   - `check` default text = annotated warning; `--format compact` = `path:l:c: CognitiveOverload: <flag msgs joined by '; '>`; `--format json` = one document after all files (`src/json.rs`, serde, `schema_version` 1), for `analyze` and `check`.
   - `analyze` prints M1's line + a metric/value table. `FileSummary.mean_dependency_distance`/`passives` are `None` until M3b.
   - `tests/positions.rs`: text, compact and JSON give the same line/column, at the sentence's first character. `docs/examples/github-actions.yml` + `tests/examples.rs`.
@@ -107,9 +107,12 @@ VERNIER_TEST_MODEL=$PWD/.sdd/m3b-spike/models/rbeg-onnx cargo test --release --t
 - User answers 2026-09-30: ADR 0001 accepted; performance baseline recorded, not a gate (`measurements/performance-baseline.md`, BACKLOG 6); the CI example installs from `github.com/GRBurst/vernier`.
 - `just spec-check <file>` on a non-spec file (plan, audit) fails its title rule; the hook's default run checks specs only. Expected, not friction.
 
+- **Phase 2, 2026-09-30.** Review pass 1 (fresh-context `spec-review1`) FAILED with 11 blocking findings: ticked criteria had drifted from as-built plan decisions. Spec repaired in place (8723cc6, audit 013); three code defects the repair had written into the spec were fixed instead (b7bbf3d..b9e0fa4, audits 014 passive voice absent without any parse, 015 typed absence reasons). 242 tests. `gates.md` has both blocks.
+
 ## Next action
 
-1. Phase 2 for spec 001, chosen by the user 2026-09-30 (BACKLOG 2: Review, Spec-Approval, Comprehension) and the user's by-hand review → `DONE`.
+1. Phase 2 review pass 2 of spec 001 by a fresh-context reviewer; repair blocking findings; stop at a pass without blocking findings or after pass 4 (PROCESS Phase 2).
+2. Then the human gates: Spec-Approval (the user confirms the criteria; also the M3a as-built choices under Open tasks) and Comprehension (three questions written by a fresh-context reviewer from the spec); record both in `gates.md`; the user's by-hand review → milestones `DONE`.
 
 ## Known-bad approaches
 

@@ -91,3 +91,12 @@ Verdict is `PASSED`, `FAILED` or `NOT_RUN` (with reason).
   - N10 clauses count content tokens only → M3a 5.
 - Consequence: M3b is `IN PROGRESS`; its new criterion 1 stays `[ ]` because no automated test covers the stderr notice line (`eprintln!` in `src/main.rs` `process`). A by-hand run on 2026-09-30 printed it as specified. A unit test is owed; main is adding it.
 - Residue: the user still has to confirm the as-built choices behind B6/B7 (HANDOVER, "M3a decisions to confirm"). A re-review (pass 2) is owed.
+
+## Review — pass 1, follow-up (2026-09-30)
+
+- The pass-1 repair (8723cc6) had written three code defects into the spec as built; that weakened a requirement (A2), so the code was fixed instead and the intended requirements restored:
+  - passive voice was 0, not absent, when no sentence was parsed → fixed, M4 4 restored (5623baa, 84afe70, audit 014);
+  - an absent MDD named the wrong reason in the table and the diagnostic → typed `Absence` (`no parse`, `too long for the model`, `no content dependency`), labels bound in File metrics, M3a 3 and M5 1 (54c7592, b9e0fa4, audit 015).
+- The owed unit test for M3b criterion 1's notice exists (`each_too_long_sentence_gets_the_specified_notice`, b7bbf3d); M3b is `IMPLEMENTED` again.
+- An empty file analyzed with a model reports MDD and passive voice absent (`no parse`): no sentence was parsed (main, 2026-09-30).
+- Next: pass 2 by a fresh-context reviewer.
