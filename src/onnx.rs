@@ -38,6 +38,10 @@ pub struct OnnxParser {
 pub enum LoadError {
     #[error("{} does not exist", path.display())]
     MissingFile { path: PathBuf },
+    #[error("{} is not a directory", path.display())]
+    NotADirectory { path: PathBuf },
+    #[error("{} is not a file", path.display())]
+    NotAFile { path: PathBuf },
     #[error("cannot read {}: {source}", path.display())]
     Read {
         path: PathBuf,
@@ -172,8 +176,8 @@ impl OnnxParser {
     /// Call it at most once per process after a runtime failure: `ort` 2.0.0-rc.13 marks its
     /// library slot filled even when loading fails, so a second load would use an unset slot.
     pub fn load(model_dir: &Path, runtime: &Path) -> Result<Self, LoadError> {
-        if !model_dir.is_dir() {
-            return Err(LoadError::MissingFile {
+        if !kind_of(model_dir.to_path_buf())?.is_dir() {
+            return Err(LoadError::NotADirectory {
                 path: model_dir.to_path_buf(),
             });
         }
@@ -297,11 +301,25 @@ impl Parser for OnnxParser {
     }
 }
 
+/// A path that must be a regular file: missing, not a file, or unreadable metadata each have
+/// their own error.
 fn existing(path: PathBuf) -> Result<PathBuf, LoadError> {
-    if path.is_file() {
+    if kind_of(path.clone())?.is_file() {
         Ok(path)
     } else {
-        Err(LoadError::MissingFile { path })
+        Err(LoadError::NotAFile { path })
+    }
+}
+
+/// What `path` is (following symbolic links), or that it does not exist, or why it cannot be
+/// looked at.
+fn kind_of(path: PathBuf) -> Result<std::fs::FileType, LoadError> {
+    match std::fs::metadata(&path) {
+        Ok(metadata) => Ok(metadata.file_type()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            Err(LoadError::MissingFile { path })
+        }
+        Err(source) => Err(LoadError::Read { path, source }),
     }
 }
 

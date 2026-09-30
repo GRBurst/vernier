@@ -66,6 +66,54 @@ fn a_missing_model_directory_is_named() {
     }
 }
 
+/// Given a model path that is a regular file, not a directory
+/// When it is loaded
+/// Then the error names the path as not a directory, not as missing
+#[test]
+fn a_model_path_that_is_a_file_is_not_a_directory() {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    match load_error(&file) {
+        LoadError::NotADirectory { path } => assert_eq!(path, file),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        load_error(&file).to_string(),
+        format!("{} is not a directory", file.display())
+    );
+}
+
+/// Given a model directory in which one of the three files is a directory instead, each in turn
+/// When it is loaded
+/// Then the error names that path as not a file, not as missing
+#[test]
+fn a_model_file_that_is_a_directory_is_not_a_file() {
+    let tokenizer = tokenizer(true);
+    let all = [
+        ("config.json", CONFIG),
+        ("tokenizer.json", tokenizer.as_str()),
+        ("onnx/model.onnx", "not a model"),
+    ];
+    for odd in 0..all.len() {
+        let files: Vec<(&str, &str)> = (0..all.len())
+            .filter(|&i| i != odd)
+            .map(|i| all[i])
+            .collect();
+        let dir = model_dir(&format!("dir-as-file-{odd}"), &files);
+        fs::create_dir_all(dir.join(all[odd].0)).unwrap();
+        let error = load_error(&dir);
+        assert_eq!(
+            error.to_string(),
+            format!("{} is not a file", dir.join(all[odd].0).display()),
+            "{}",
+            all[odd].0
+        );
+        match error {
+            LoadError::NotAFile { path } => assert_eq!(path, dir.join(all[odd].0)),
+            other => panic!("{}: {other:?}", all[odd].0),
+        }
+    }
+}
+
 /// Given a model directory in which one of the three files is missing, each in turn
 /// When it is loaded (with a runtime that does not exist)
 /// Then the error names the missing file, not the runtime

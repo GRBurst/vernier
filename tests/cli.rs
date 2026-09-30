@@ -351,6 +351,30 @@ fn a_missing_model_is_named_and_exits_2() {
     assert_load_fails(&dir, &dir.join("libonnxruntime.so"), &dir);
 }
 
+/// Given `--model-path` naming a path that does not exist, and one naming a regular file
+/// When `vernier check` runs with each
+/// Then stderr is exactly one line naming the path and the cause, `<path> does not exist` for
+/// the first and `<path> is not a directory` for the second, and it exits 2 without output
+/// (M3b 6)
+#[test]
+fn a_missing_or_non_directory_model_path_names_its_cause() {
+    let gone = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-model-none");
+    let file = fixture("sample.md");
+    for (path, cause) in [(&gone, "does not exist"), (&file, "is not a directory")] {
+        let path = path.display().to_string();
+        let out = vernier_with_runtime(
+            &["check", "--model-path", &path, "x.md"],
+            Path::new("no-such-lib.so"),
+        );
+        assert_eq!(out.status.code(), Some(2), "{path}");
+        assert!(out.stdout.is_empty(), "{path}");
+        assert_eq!(
+            String::from_utf8(out.stderr).unwrap(),
+            format!("vernier: cannot load the model {path}: {path} {cause}\n")
+        );
+    }
+}
+
 /// Given a model directory without `tokenizer.json`, and a runtime library that does not exist
 /// When `vernier` runs with it
 /// Then stderr names `tokenizer.json` (the files are checked before the runtime) and it exits 2
