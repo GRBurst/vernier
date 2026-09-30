@@ -132,13 +132,20 @@ pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Sty
         .iter()
         .map(|m| format!("- {m}"))
         .collect();
+    let lines = sentence_lines(source, &diagnostic.source_range);
+    let underline =
+        diagnostic.source_range.start - lines.start..diagnostic.source_range.end - lines.start;
+    // why: the snippet holds only the sentence's lines, and folding is off, so every line of the
+    // sentence shows however many there are (the default folds a tall one to `...`).
     let group = Level::WARNING
         .primary_title(TITLE)
         .id(CODE)
         .element(
-            Snippet::source(source)
+            Snippet::source(&source[lines])
+                .line_start(diagnostic.start.line())
+                .fold(false)
                 .path(path)
-                .annotation(AnnotationKind::Primary.span(diagnostic.source_range.clone())),
+                .annotation(AnnotationKind::Primary.span(underline)),
         )
         .element(
             Level::NOTE
@@ -157,6 +164,21 @@ pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Sty
     // why: prose lines are often whole paragraphs; the default width (140) would elide the
     // middle of the sentence the diagnostic is about.
     renderer.term_width(RENDER_WIDTH).render(&[group])
+}
+
+/// The byte range of the source lines `range` touches: from the start of its first line to the
+/// end of its last line, without that line's `\n` or `\r\n`.
+fn sentence_lines(source: &str, range: &Range<usize>) -> Range<usize> {
+    let start = source[..range.start].rfind('\n').map_or(0, |at| at + 1);
+    let end = source[range.end..]
+        .find('\n')
+        .map_or(source.len(), |at| range.end + at);
+    let end = if source[..end].ends_with('\r') && end < source.len() {
+        end - 1
+    } else {
+        end
+    };
+    start..end.max(range.end)
 }
 
 /// A line width no prose line reaches, so no source line is elided.
@@ -993,6 +1015,47 @@ mod tests {
                 prop_assert_eq!(first, text_at + d.start.column() - 1, "{}", text);
                 prop_assert_eq!(run, d.source_range.len(), "{}", text);
             }
+        }
+
+        /// Given one sentence hard-wrapped over 1 to 30 lines, after a paragraph of 0 to 3 lines,
+        /// LF or CRLF
+        /// When its diagnostic is rendered as text
+        /// Then the source lines shown are exactly the sentence's lines, in order, each numbered
+        /// and whole, and nothing is folded away (`...`)
+        #[test]
+        fn the_text_shows_every_line_of_the_sentence(
+            before in 0usize..4,
+            wrapped in 1usize..31,
+            crlf in any::<bool>(),
+        ) {
+            let intro: Vec<String> = (0..before).map(|i| format!("Intro line {i}")).collect();
+            let body: Vec<String> = (0..wrapped).map(|i| format!("wrapped line {i} goes on")).collect();
+            let mut lines = Vec::new();
+            if before > 0 {
+                lines.push(format!("{}.", intro.join("\n")));
+                lines.push(String::new());
+            }
+            lines.push(format!("Here {}.", body.join("\n")));
+            let doc = format!("{}\n", lines.join("\n"));
+            let doc = if crlf { doc.replace('\n', "\r\n") } else { doc };
+            let t = Thresholds { max_sentence_len: 0, ..THRESHOLDS };
+            let file = analyze(&doc, SourceFormat::Markdown, &t);
+            let found = diagnostics(&doc, &file, &t).unwrap();
+            let d = found.last().expect("the wrapped sentence");
+            let text = render_text("f.md", &doc, d, Style::Plain);
+            let first = d.start.line();
+            let expected: Vec<usize> = (first..first + wrapped).collect();
+            let shown: Vec<usize> = text
+                .lines()
+                .filter_map(|l| l.split_once(" |").and_then(|(n, _)| n.trim().parse().ok()))
+                .collect();
+            prop_assert_eq!(shown, expected, "{}", text);
+            for (n, source_line) in doc.lines().enumerate().skip(first - 1) {
+                let numbered = format!("{} |", n + 1);
+                let line = text.lines().find(|l| l.trim_start().starts_with(&numbered));
+                prop_assert!(line.is_some_and(|l| l.ends_with(source_line.trim_end_matches('\r'))), "{}", text);
+            }
+            prop_assert!(!text.lines().any(|l| l.starts_with("...")), "{}", text);
         }
 
         /// Given generated documents with a limit of 0 words, so every sentence is flagged

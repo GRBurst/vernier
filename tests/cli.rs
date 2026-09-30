@@ -523,6 +523,44 @@ fn check_underlines_a_hard_wrapped_sentence() {
     );
 }
 
+/// Given a sentence hard-wrapped over the 14 lines 3 to 16 of `tall.md`, after a first paragraph
+/// When `vernier check --max-sentence-len 5` runs
+/// Then the diagnostic shows every one of those lines, each with its line number and whole text,
+/// folds none away (`...`), shows no line outside the sentence, and closes the underline after
+/// line 16 (M5 criterion 1: "over all its lines")
+#[test]
+fn check_shows_every_line_of_a_tall_sentence() {
+    let path = fixture("tall.md");
+    let source = std::fs::read_to_string(&path).unwrap();
+    let (code, stdout) = check(&["--max-sentence-len", "5"], &[&path]);
+    assert_eq!(code, Some(1));
+    assert_eq!(
+        stdout.lines().nth(1).map(str::trim),
+        Some(format!("--> {}:3:15", path.display()).as_str())
+    );
+    let numbered: Vec<usize> = stdout
+        .lines()
+        .filter_map(|l| l.split_once(" |").and_then(|(n, _)| n.trim().parse().ok()))
+        .collect();
+    assert_eq!(numbered, (3..=16).collect::<Vec<_>>(), "{stdout}");
+    for (n, text) in source.lines().enumerate().skip(2) {
+        let shown = stdout
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("{} |", n + 1)));
+        assert!(shown.is_some_and(|l| l.ends_with(text)), "{n}: {stdout}");
+    }
+    assert!(!stdout.lines().any(|l| l.starts_with("...")), "{stdout}");
+    let last = stdout
+        .lines()
+        .position(|l| l.trim_start().starts_with("16 |"))
+        .unwrap();
+    let closing = stdout.lines().nth(last + 1).unwrap().trim();
+    assert!(
+        closing.starts_with("| |_") && closing.ends_with('^'),
+        "{stdout}"
+    );
+}
+
 /// Given the file with a long sentence
 /// When `vernier check` writes to a pipe, with `NO_COLOR` unset and set
 /// Then the output holds no escape codes
