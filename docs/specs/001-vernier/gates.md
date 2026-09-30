@@ -100,3 +100,30 @@ Verdict is `PASSED`, `FAILED` or `NOT_RUN` (with reason).
 - The owed unit test for M3b criterion 1's notice exists (`each_too_long_sentence_gets_the_specified_notice`, b7bbf3d); M3b is `IMPLEMENTED` again.
 - An empty file analyzed with a model reports MDD and passive voice absent (`no parse`): no sentence was parsed (main, 2026-09-30).
 - Next: pass 2 by a fresh-context reviewer.
+
+## Review — pass 2 (2026-09-30)
+
+- Verdict: FAILED
+- Date: 2026-09-30
+- Reviewer: fresh-context Claude (`spec-review2`) at `f787be0`; repairs applied by `pass2-fix` on main's decisions of 2026-09-30.
+- Blocking findings (finding → repair (commit)):
+  - R2-B1 a closed stdout panicked with exit 101 (`println!`) → every stdout write goes through a fallible writer, a failed write exits 2 with one stderr line and no panic, M5 2 says so; tests `a_closed_stdout_exits_2_without_a_panic` (tests/cli.rs, seen 101 first) and `a_failed_write_exits_2` (src/main.rs); audit 016 (bf80c10); `clippy::print_stdout` denied outside tests (a9c1dfa).
+  - R2-B2 "exit 0" (M1 6, M5 5) and "SHALL print one JSON document" (M5 3) contradicted the exit-2 paths → "unless M5 criterion 2 requires 2"; M5 3 applies when no usage error or model-load failure ends the run, and a file that cannot be read or has a sentence that cannot be parsed has no object (aa002d5); the `analyze` and `check` help say they exit 2 on an error (1f33921).
+  - R2-B3 block prose also joins directly across a backslash escape → Definitions *Block prose* names it (`a\*b` reads `a*b`, verified in `inline_markup_joins_spans_directly`).
+  - R2-B4 the user's Q-B answer "fixed advice per rule" had no criterion → new M5 criterion 9: one `= help:` line per flag in flag order, a fixed text per flag stated verbatim, `help` in JSON flags (schema_version 1), compact unchanged; the intro example re-run; audit 017 (a0d5e69).
+  - R2-B5 M3a 3's "never `no parse`" covered files without a parsed sentence → the reason `no content dependency` is for a parsed sentence and a file with at least one parsed sentence; a file without one reads `no parse`.
+  - R2-B6 `end_line`/`end_column`, `code` and `message` were unstated → M5 3 states them; stating the end exposed a defect: the end landed past closing markup when more prose followed (`*hi.* Then`), so the last character is mapped now; the M5 6 property covers ends and the one-line underline; audit 018 (aa002d5).
+  - R2-B7 as-built choices on projected roots, depth and center-embedding were unconfirmed → one `[NEEDS CLARIFICATION: … Fallback: as built.]` marker each in M3a 2, 4 and 6, quoting the text before review pass 1; Provenance points at them.
+- Non-blocking findings (finding → repair):
+  - R2-N1 normative text without SHALL, unwanted behaviour as WHEN → SHALL added in M3a 3, M3b 1, M4 1, M4 4, M5 1, M5 3; M1 7, M2 4, M3a 8, M3b 6 use IF … THEN.
+  - R2-N2 usage error and unparsable-sentence exit 2 untested → `a_usage_error_exits_2` (tests/cli.rs) and `a_sentence_that_cannot_be_parsed_exits_2` (src/main.rs, a test parser, no model) (bf80c10).
+  - R2-N3 the model's label form was wrong (FEATS holds `|`) and incomplete → Definitions *Model*: labels 0 to n − 1 without a gap, UPOS before the first `|`, DEPREL after the last, label 0 reserved, goeswith, a root and another relation label required, the position limits.
+  - R2-N4 *Block prose* covered only paragraphs → new Definition *Block*: a paragraph or a tight list item's text, split at every block-level start or end; in plain text a run of non-blank lines.
+  - R2-N5 the tree check was attributed to the metric functions → M3a 8: `DependencyTree::new` returns the error (and lists all five causes).
+  - R2-N6 the diagnostic's "verb" can be an adjective; the help said "from the root" → M3a 6 says a diagnostic calls the head the verb whatever its part of speech; the `--max-tree-depth` help says "from a projected root" and M3a 4 requires it, tested by `max_tree_depth_help_says_edges` (1f33921).
+  - R2-N7 M5 3 "per file that was read and reported" narrowed plan-M5's "per readable file" → decision (main, 2026-09-30): a file with a sentence that cannot be parsed is not reported; exit 2.
+  - R2-N8 Provenance omitted pass 1's follow-up → a line names audits 014 and 015 and the notice test.
+  - R2-N9 the `no parse` causes omitted a file without sentences analyzed with a model → File metrics rows and M4 4 name "the file has no sentence".
+- Repairs without a commit named are spec text, in the commit that adds this section.
+- Consequence: every criterion keeps its tick; each is verified by a named test, the new M5 9 by `each_flag_carries_its_fixed_advice`, `the_text_ends_with_one_help_line_per_flag`, `the_text_gives_each_flags_advice_in_order` and `check_prints_a_cognitive_overload_diagnostic`.
+- Residue: the three M3a markers await the user; a re-review (pass 3) is owed.
