@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use ort::session::Session;
-use ort::value::{Outlet, Tensor, ValueType};
+use ort::value::{Outlet, Tensor, TensorElementType, ValueType};
 use tokenizers::Tokenizer;
 
 use crate::decoder::{
@@ -62,61 +62,93 @@ pub enum LoadError {
 pub enum GraphError {
     #[error("the graph has no input \"{name}\"")]
     NoInput { name: &'static str },
+    #[error("the graph's input \"{name}\" is {found}, not a tensor of i64")]
+    InputType { name: &'static str, found: String },
     #[error("the graph has an input \"{name}\" besides \"input_ids\" and \"attention_mask\"")]
     OtherInput { name: String },
     #[error("the graph has no output \"logits\"")]
     NoLogits,
-    #[error("the graph's output \"logits\" is not a tensor")]
-    LogitsNotTensor,
+    #[error("the graph's output \"logits\" is {found}, not a tensor of f32")]
+    LogitsType { found: String },
     #[error("the graph's \"logits\" has {width} values per piece, but there are {labels} labels")]
     Width { width: i64, labels: usize },
 }
 
-/// What a graph offers under the name `logits`: nothing, something other than a tensor, or a
-/// tensor with these dimensions (`-1` where a dimension is dynamic).
+/// What a graph declares under one of its names: a tensor of an element type with these
+/// dimensions (`-1` where a dimension is dynamic), or a value that is not a tensor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LogitsOutlet<'a> {
-    Missing,
+enum Declared<'a> {
+    Tensor(TensorElementType, &'a [i64]),
     NotTensor,
-    Tensor(&'a [i64]),
 }
 
-/// The graph's `logits` output among `outputs`.
-fn logits_outlet(outputs: &[Outlet]) -> LogitsOutlet<'_> {
-    match outputs.iter().find(|outlet| outlet.name() == LOGITS) {
-        None => LogitsOutlet::Missing,
-        Some(outlet) => match outlet.dtype() {
-            ValueType::Tensor { shape, .. } => LogitsOutlet::Tensor(shape),
+impl<'a> Declared<'a> {
+    /// What `outlet` declares.
+    fn of(outlet: &'a Outlet) -> Self {
+        match outlet.dtype() {
+            ValueType::Tensor { ty, shape, .. } => Self::Tensor(*ty, shape),
             ValueType::Sequence(_) | ValueType::Map { .. } | ValueType::Optional(_) => {
-                LogitsOutlet::NotTensor
+                Self::NotTensor
             }
-        },
+        }
+    }
+
+    /// How an error names it: `a tensor of i32`, or `not a tensor`.
+    fn describe(self) -> String {
+        match self {
+            Self::Tensor(ty, _) => format!("a tensor of {ty}"),
+            Self::NotTensor => "not a tensor".to_owned(),
+        }
     }
 }
 
-/// Whether a graph with these input names and this `logits` output fits `labels` labels: its
-/// inputs are exactly `input_ids` and `attention_mask`, it has a tensor output `logits`, and the
-/// last dimension of `logits` is the label count where the graph states it (a dynamic or unstated
-/// last dimension is accepted here and checked on every parse).
-fn check_graph(inputs: &[&str], logits: LogitsOutlet<'_>, labels: usize) -> Result<(), GraphError> {
-    if let Some(name) = INPUTS.into_iter().find(|name| !inputs.contains(name)) {
-        return Err(GraphError::NoInput { name });
-    }
-    if let Some(name) = inputs.iter().find(|name| !INPUTS.contains(name)) {
-        return Err(GraphError::OtherInput {
-            name: (*name).to_owned(),
-        });
-    }
+/// Whether a graph with these inputs and this `logits` output (`None` when it has none) fits
+/// `labels` labels: its inputs are exactly `input_ids` and `attention_mask`, both tensors of
+/// i64, it has an output `logits` that is a tensor of f32, and the last dimension of `logits` is
+/// the label count where the graph states it (a dynamic or unstated last dimension is accepted
+/// here and checked on every parse).
+fn check_graph(
+    inputs: &[(&str, Declared<'_>)],
+    logits: Option<Declared<'_>>,
+    labels: usize,
+) -> Result<(), GraphError> {
+    check_inputs(inputs)?;
     let dims = match logits {
-        LogitsOutlet::Missing => return Err(GraphError::NoLogits),
-        LogitsOutlet::NotTensor => return Err(GraphError::LogitsNotTensor),
-        LogitsOutlet::Tensor(dims) => dims,
+        None => return Err(GraphError::NoLogits),
+        Some(Declared::Tensor(TensorElementType::Float32, dims)) => dims,
+        Some(other) => {
+            return Err(GraphError::LogitsType {
+                found: other.describe(),
+            });
+        }
     };
     match dims.last() {
         Some(&width) if width >= 0 && usize::try_from(width) != Ok(labels) => {
             Err(GraphError::Width { width, labels })
         }
         Some(_) | None => Ok(()),
+    }
+}
+
+/// Whether the graph's inputs are exactly `input_ids` and `attention_mask`, both tensors of i64.
+fn check_inputs(inputs: &[(&str, Declared<'_>)]) -> Result<(), GraphError> {
+    for name in INPUTS {
+        match inputs.iter().find(|(input, _)| *input == name) {
+            None => return Err(GraphError::NoInput { name }),
+            Some((_, Declared::Tensor(TensorElementType::Int64, _))) => {}
+            Some((_, other)) => {
+                return Err(GraphError::InputType {
+                    name,
+                    found: other.describe(),
+                });
+            }
+        }
+    }
+    match inputs.iter().find(|(input, _)| !INPUTS.contains(input)) {
+        Some((name, _)) => Err(GraphError::OtherInput {
+            name: (*name).to_owned(),
+        }),
+        None => Ok(()),
     }
 }
 
@@ -158,13 +190,20 @@ impl OnnxParser {
                 path: model.clone(),
                 source,
             })?;
-        let inputs: Vec<&str> = session.inputs().iter().map(Outlet::name).collect();
-        check_graph(&inputs, logits_outlet(session.outputs()), labels.len()).map_err(
-            |problem| LoadError::Graph {
-                path: model,
-                problem,
-            },
-        )?;
+        let inputs: Vec<(&str, Declared<'_>)> = session
+            .inputs()
+            .iter()
+            .map(|outlet| (outlet.name(), Declared::of(outlet)))
+            .collect();
+        let logits = session
+            .outputs()
+            .iter()
+            .find(|outlet| outlet.name() == LOGITS)
+            .map(Declared::of);
+        check_graph(&inputs, logits, labels.len()).map_err(|problem| LoadError::Graph {
+            path: model,
+            problem,
+        })?;
         Ok(Self {
             session,
             tokenizer,
@@ -308,72 +347,119 @@ fn read_tokenizer(path: PathBuf) -> Result<(Tokenizer, Special), LoadError> {
 mod tests {
     use super::*;
 
-    const BOTH: [&str; 2] = ["attention_mask", "input_ids"];
+    const I64: TensorElementType = TensorElementType::Int64;
+    const F32: TensorElementType = TensorElementType::Float32;
 
-    /// Given the tested model's graph shape (inputs in either order, `logits` of
-    /// `[batch, width, 2561]` with dynamic batch and width) and 2561 labels, or a dynamic or
-    /// unstated label dimension
+    /// The inputs of the tested model: `input_ids` and `attention_mask`, tensors of i64 of
+    /// dynamic batch and sequence.
+    fn inputs(names: &[&'static str]) -> Vec<(&'static str, Declared<'static>)> {
+        names
+            .iter()
+            .map(|&name| (name, Declared::Tensor(I64, &[-1, -1])))
+            .collect()
+    }
+
+    /// Given the tested model's graph (i64 inputs in either order, `logits` a tensor of f32 of
+    /// `[batch, sequence, 2561]` with dynamic batch and sequence) and 2561 labels, or a dynamic
+    /// or unstated label dimension
     /// When the graph is checked
     /// Then it fits (Definitions, *Model*)
     #[test]
-    fn a_graph_with_the_contracts_inputs_and_width_fits() {
-        for inputs in [INPUTS, BOTH] {
+    fn a_graph_with_the_contracts_inputs_types_and_width_fits() {
+        for names in [INPUTS, ["attention_mask", "input_ids"]] {
             for dims in [&[-1, -1, 2561][..], &[-1, -1, -1], &[]] {
-                let logits = LogitsOutlet::Tensor(dims);
+                let logits = Some(Declared::Tensor(F32, dims));
                 assert_eq!(
-                    check_graph(&inputs, logits, 2561),
+                    check_graph(&inputs(&names), logits, 2561),
                     Ok(()),
-                    "{inputs:?} {dims:?}"
+                    "{names:?} {dims:?}"
                 );
             }
         }
     }
 
     /// Given a graph that breaks the contract in one way each: an input missing, an input
-    /// besides the two, no `logits`, a `logits` that is not a tensor, a stated label dimension
-    /// other than the label count
+    /// besides the two, an input of another element type or not a tensor, no `logits`, a
+    /// `logits` of another element type or not a tensor, a stated label dimension other than the
+    /// label count
     /// When the graph is checked against 4 labels
     /// Then each is refused with its own reason (Definitions, *Model*; M3b criterion 6)
     #[test]
     fn a_graph_that_breaks_the_contract_is_refused() {
-        let fitting = LogitsOutlet::Tensor(&[-1, -1, 4]);
+        let fitting = Some(Declared::Tensor(F32, &[-1, -1, 4]));
+        let int32_ids = vec![
+            (
+                "input_ids",
+                Declared::Tensor(TensorElementType::Int32, &[-1, -1]),
+            ),
+            ("attention_mask", Declared::Tensor(I64, &[-1, -1])),
+        ];
+        let listed_mask = vec![
+            ("input_ids", Declared::Tensor(I64, &[-1, -1])),
+            ("attention_mask", Declared::NotTensor),
+        ];
         let cases = [
             (
-                &["input_ids"][..],
+                inputs(&["input_ids"]),
                 fitting,
                 GraphError::NoInput {
                     name: "attention_mask",
                 },
             ),
             (
-                &["attention_mask"],
+                inputs(&["attention_mask"]),
                 fitting,
                 GraphError::NoInput { name: "input_ids" },
             ),
             (
-                &["input_ids", "attention_mask", "token_type_ids"],
+                inputs(&["input_ids", "attention_mask", "token_type_ids"]),
                 fitting,
                 GraphError::OtherInput {
                     name: "token_type_ids".to_owned(),
                 },
             ),
-            (&INPUTS, LogitsOutlet::Missing, GraphError::NoLogits),
             (
-                &INPUTS,
-                LogitsOutlet::NotTensor,
-                GraphError::LogitsNotTensor,
+                int32_ids,
+                fitting,
+                GraphError::InputType {
+                    name: "input_ids",
+                    found: "a tensor of i32".to_owned(),
+                },
             ),
             (
-                &INPUTS,
-                LogitsOutlet::Tensor(&[1, 6, 2561]),
+                listed_mask,
+                fitting,
+                GraphError::InputType {
+                    name: "attention_mask",
+                    found: "not a tensor".to_owned(),
+                },
+            ),
+            (inputs(&INPUTS), None, GraphError::NoLogits),
+            (
+                inputs(&INPUTS),
+                Some(Declared::Tensor(TensorElementType::Float16, &[-1, -1, 4])),
+                GraphError::LogitsType {
+                    found: "a tensor of f16".to_owned(),
+                },
+            ),
+            (
+                inputs(&INPUTS),
+                Some(Declared::NotTensor),
+                GraphError::LogitsType {
+                    found: "not a tensor".to_owned(),
+                },
+            ),
+            (
+                inputs(&INPUTS),
+                Some(Declared::Tensor(F32, &[1, 6, 2561])),
                 GraphError::Width {
                     width: 2561,
                     labels: 4,
                 },
             ),
             (
-                &INPUTS,
-                LogitsOutlet::Tensor(&[-1, -1, 0]),
+                inputs(&INPUTS),
+                Some(Declared::Tensor(F32, &[-1, -1, 0])),
                 GraphError::Width {
                     width: 0,
                     labels: 4,
@@ -382,7 +468,7 @@ mod tests {
         ];
         for (inputs, logits, expected) in cases {
             assert_eq!(
-                check_graph(inputs, logits, 4),
+                check_graph(&inputs, logits, 4),
                 Err(expected.clone()),
                 "{expected}"
             );

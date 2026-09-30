@@ -154,3 +154,4 @@ Verdict is `PASSED`, `FAILED` or `NOT_RUN` (with reason).
 - Repairs without a commit named are spec text, in the commit that adds this section.
 - Consequence: every criterion keeps its tick, each verified by a named test (above, and in the pass-1 and pass-2 blocks); `just verify` passes, and the model-gated tests pass with `VERNIER_TEST_MODEL` set.
 - Residue: seven `[NEEDS CLARIFICATION]` markers await the user (M3a 2, 4, 5, three in 6; M5 3); a re-review (pass 4, the last PROCESS allows) is owed.
+- Amended (main, 2026-09-30): the graph contract of *Model* includes the element types (`input_ids` and `attention_mask` tensors of int64, `logits` a tensor of float32), checked at load by `check_graph` (`GraphError::InputType`, `GraphError::LogitsType`); tests `a_graph_that_breaks_the_contract_is_refused` and `a_graph_with_the_contracts_inputs_types_and_width_fits` (src/onnx.rs); the same gap as R3-B2, so audit 021 covers it.
