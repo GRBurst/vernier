@@ -127,3 +127,4 @@ Verdict is `PASSED`, `FAILED` or `NOT_RUN` (with reason).
 - Repairs without a commit named are spec text, in the commit that adds this section.
 - Consequence: every criterion keeps its tick; each is verified by a named test, the new M5 9 by `each_flag_carries_its_fixed_advice`, `the_text_ends_with_one_help_line_per_flag`, `the_text_gives_each_flags_advice_in_order` and `check_prints_a_cognitive_overload_diagnostic`.
 - Residue: the three M3a markers await the user; a re-review (pass 3) is owed.
+- Amended (main, 2026-09-30): M5 9 prints one `= help:` line per distinct flag kind, in first-occurrence order, so two center-embeddings get one line; JSON keeps `help` on every flag; test `two_center_embeddings_get_one_help_line` (src/diagnostic.rs).

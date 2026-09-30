@@ -112,9 +112,20 @@ pub fn render_compact(path: &str, diagnostic: &Diagnostic) -> String {
     )
 }
 
+/// The advice of each flag kind among `flags`, once, in first-occurrence order.
+fn distinct_advice(flags: &[FlagMessage]) -> Vec<&'static str> {
+    let mut kinds: Vec<(&str, &'static str)> = Vec::new();
+    for flag in flags {
+        if !kinds.iter().any(|(name, _)| *name == flag.name) {
+            kinds.push((flag.name, flag.help));
+        }
+    }
+    kinds.into_iter().map(|(_, help)| help).collect()
+}
+
 /// The annotated diagnostic: `warning[CognitiveOverload]`, the sentence's position, its source
 /// lines with the whole sentence underlined, the `= metrics:` list, then one `= help:` line per
-/// flag, in flag order.
+/// distinct flag kind, in first-occurrence order.
 pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Style) -> String {
     let listed: Vec<String> = diagnostic
         .metrics
@@ -135,10 +146,9 @@ pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Sty
                 .message(format!("metrics:\n{}", listed.join("\n"))),
         )
         .elements(
-            diagnostic
-                .flags
-                .iter()
-                .map(|flag| Level::HELP.message(flag.help)),
+            distinct_advice(&diagnostic.flags)
+                .into_iter()
+                .map(|help| Level::HELP.message(help)),
         );
     let renderer = match style {
         Style::Plain => Renderer::plain(),
@@ -445,7 +455,8 @@ mod tests {
 
     /// Given a sentence flagged LongSentence and DeepTree
     /// When its diagnostic is rendered as text
-    /// Then it ends with one `= help:` line per flag, in flag order, after the metrics
+    /// Then it ends with one `= help:` line per flag (the two differ in kind), in flag order,
+    /// after the metrics
     #[test]
     fn the_text_ends_with_one_help_line_per_flag() {
         let file = file_of(vec![sentence(
@@ -468,6 +479,38 @@ mod tests {
         let last_metric = lines.iter().rposition(|l| l.starts_with("- ")).unwrap();
         let first_help = lines.iter().position(|l| l.starts_with("= help:")).unwrap();
         assert!(last_metric < first_help, "{text}");
+    }
+
+    /// Given a sentence flagged LongSentence and twice CenterEmbedding
+    /// When its diagnostic is rendered as text
+    /// Then each flag kind gets one `= help:` line, in first-occurrence order, while the
+    /// diagnostic keeps all three flags
+    #[test]
+    fn two_center_embeddings_get_one_help_line() {
+        let embedding = |subject: &str| {
+            SyntacticFlag::CenterEmbedding(CenterEmbedding {
+                subject: subject.to_owned(),
+                verb: "caused".to_owned(),
+                words_between: 4,
+            })
+        };
+        let file = file_of(vec![sentence(
+            0..15,
+            30,
+            vec![Flag::LongSentence],
+            vec![embedding("proposal"), embedding("plan")],
+        )]);
+        let found = diagnostics("First sentence.\n", &file, &THRESHOLDS).unwrap();
+        assert_eq!(found[0].flags.len(), 3);
+        let text = render_text("f.md", "First sentence.\n", &found[0], Style::Plain);
+        assert_eq!(
+            help_lines(&text),
+            [
+                "= help: Split the sentence into shorter ones.",
+                "= help: Move the clause between the subject and its verb after the verb, or make it a sentence of its own.",
+            ],
+            "{text}"
+        );
     }
 
     fn sentence(
@@ -839,8 +882,8 @@ mod tests {
         /// Given any sentence, parsed or not, flagged by thresholds that equal its metrics half the
         /// time
         /// When its diagnostic is rendered as text
-        /// Then it ends with exactly one `= help:` line per flag, in flag order, each the flag's
-        /// advice
+        /// Then it ends with exactly one `= help:` line per distinct flag kind, in first-occurrence
+        /// order, each the kind's advice
         #[test]
         fn the_text_gives_each_flags_advice_in_order(
             words in 1usize..40,
@@ -865,7 +908,17 @@ mod tests {
                 flags,
             };
             let text = render_text("f.md", "A.\n", &d, Style::Plain);
-            let expected: Vec<String> = d.flags.iter().map(|f| format!("= help: {}", f.help)).collect();
+            let mut kinds: Vec<&str> = Vec::new();
+            for flag in &d.flags {
+                if !kinds.contains(&flag.name) {
+                    kinds.push(flag.name);
+                }
+            }
+            let expected: Vec<String> = kinds
+                .iter()
+                .filter_map(|name| d.flags.iter().find(|f| f.name == *name))
+                .map(|f| format!("= help: {}", f.help))
+                .collect();
             prop_assert_eq!(help_lines(&text), expected, "{}", text);
         }
 
