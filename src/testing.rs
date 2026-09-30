@@ -131,6 +131,37 @@ impl Parser for EveryTooLong {
     }
 }
 
+/// Parses every sentence without a content dependency: its whitespace-separated words as content
+/// tokens (`INTJ`), each headed by a trailing `PUNCT` root, so every content token is a projected
+/// root (a sentence of one word, like `Go.`, has one; `Yes no.` has two).
+pub(crate) struct ProjectedRoots;
+
+impl Parser for ProjectedRoots {
+    type Error = std::convert::Infallible;
+
+    fn parse(&mut self, sentence: &str) -> Result<Parse, Self::Error> {
+        let words: Vec<&str> = sentence.split_whitespace().collect();
+        let root = words.len() + 1;
+        let token = |id: usize, form: &str, upostag: &str, head: usize, deprel: &str| Token {
+            id,
+            form: form.to_owned(),
+            lemma: form.to_lowercase(),
+            upostag: upostag.to_owned(),
+            head,
+            deprel: deprel.to_owned(),
+        };
+        let content = words
+            .iter()
+            .enumerate()
+            .map(|(i, form)| token(i + 1, form, "INTJ", root, "discourse"));
+        Ok(Parse::Tokens(
+            content
+                .chain(std::iter::once(token(root, ".", "PUNCT", 0, "root")))
+                .collect(),
+        ))
+    }
+}
+
 const DEPRELS: [&str; 13] = [
     "nsubj",
     "nsubj:pass",

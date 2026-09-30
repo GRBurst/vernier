@@ -2,6 +2,7 @@
 //! the syntactic metrics and flags of a parsed sentence.
 
 use std::convert::Infallible;
+use std::fmt;
 use std::ops::Range;
 
 use crate::block::Block;
@@ -74,10 +75,44 @@ pub enum Syntax {
 impl Syntax {
     /// The syntax of a parsed sentence, `None` otherwise.
     pub fn parsed(&self) -> Option<&SentenceSyntax> {
+        self.parsed_or_absence().ok()
+    }
+
+    /// The syntax of a parsed sentence, or why its syntactic metrics are absent.
+    pub fn parsed_or_absence(&self) -> Result<&SentenceSyntax, Absence> {
         match self {
-            Self::Parsed(syntax) => Some(syntax),
-            Self::Unparsed | Self::TooLong { .. } => None,
+            Self::Parsed(syntax) => Ok(syntax),
+            Self::Unparsed => Err(Absence::NoParse),
+            Self::TooLong { .. } => Err(Absence::TooLongForTheModel),
         }
+    }
+}
+
+impl SentenceSyntax {
+    /// The sentence's mean dependency distance, absent when it has no content dependency.
+    pub fn mean_dependency_distance(&self) -> Result<f64, Absence> {
+        self.metrics.mdd().ok_or(Absence::NoContentDependency)
+    }
+}
+
+/// Why a syntactic metric has no value; its `Display` is the reason an `absent (…)` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Absence {
+    /// Nothing was parsed: no parser ran, or (for a file) no sentence was parsed.
+    NoParse,
+    /// The sentence is too long for the model.
+    TooLongForTheModel,
+    /// Parsed, but without a content dependency to measure.
+    NoContentDependency,
+}
+
+impl fmt::Display for Absence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoParse => "no parse",
+            Self::TooLongForTheModel => "too long for the model",
+            Self::NoContentDependency => "no content dependency",
+        })
     }
 }
 
@@ -106,6 +141,20 @@ pub struct FileAnalysis {
     pub dependency_distance: Option<DependencyDistance>,
     pub nominalizations: NominalizationCount,
     pub passives: Option<usize>,
+}
+
+impl FileAnalysis {
+    /// The file's mean dependency distance, pooled over its parsed sentences: absent with
+    /// `NoParse` when no sentence was parsed, with `NoContentDependency` when the parsed
+    /// sentences have no content dependency.
+    pub fn mean_dependency_distance(&self) -> Result<f64, Absence> {
+        if !self.sentences.iter().any(|s| s.syntax.parsed().is_some()) {
+            return Err(Absence::NoParse);
+        }
+        self.dependency_distance
+            .and_then(DependencyDistance::mean)
+            .ok_or(Absence::NoContentDependency)
+    }
 }
 
 /// Why a file could not be analyzed with a parser.
@@ -384,7 +433,7 @@ mod tests {
     use crate::nominalization::{parsed_nominalizations, surface_lemma};
     use crate::testing::{
         EXAMPLE_CONLLU, EXAMPLE_TEXT, EveryTooLong, NOMZ_CONLLU, NOMZ_TEXT, PASSIVE_CONLLU,
-        PASSIVE_TEXT, tokens_from_conllu,
+        PASSIVE_TEXT, ProjectedRoots, tokens_from_conllu,
     };
     use crate::words::count_words;
     use proptest::prelude::*;
@@ -674,6 +723,77 @@ mod tests {
         assert_eq!(file.sentences.len(), 2);
         assert!(file.sentences.iter().all(|s| s.syntax.parsed().is_none()));
         assert_eq!(file.passives, None);
+    }
+
+    /// Given each reason a syntactic metric can be absent
+    /// When it is displayed
+    /// Then it reads the label `absent (…)` names in the table and the diagnostic
+    #[test]
+    fn absences_display_their_labels() {
+        assert_eq!(Absence::NoParse.to_string(), "no parse");
+        assert_eq!(
+            Absence::TooLongForTheModel.to_string(),
+            "too long for the model"
+        );
+        assert_eq!(
+            Absence::NoContentDependency.to_string(),
+            "no content dependency"
+        );
+    }
+
+    /// Given `Go.` and `Stop!`
+    /// When the file is analyzed without a parser, with one that finds every sentence too long,
+    /// and with one that parses each without a content dependency
+    /// Then each sentence's syntax is absent for `NoParse`, `TooLongForTheModel`, or parsed with
+    /// its MDD absent for `NoContentDependency`; the file's MDD is absent for `NoParse` in the
+    /// first two cases (no sentence was parsed) and for `NoContentDependency` in the third
+    #[test]
+    fn an_absent_mean_dependency_distance_names_its_cause() {
+        let source = "Go.\n\nStop!\n";
+        let t = thresholds(25);
+        let plain = md(source, 25);
+        let too_long =
+            analyze_parsed(source, SourceFormat::Markdown, &t, &mut EveryTooLong).unwrap();
+        let rootless =
+            analyze_parsed(source, SourceFormat::Markdown, &t, &mut ProjectedRoots).unwrap();
+        for (file, sentence, whole) in [
+            (&plain, Err(Absence::NoParse), Absence::NoParse),
+            (
+                &too_long,
+                Err(Absence::TooLongForTheModel),
+                Absence::NoParse,
+            ),
+            (
+                &rootless,
+                Ok(Absence::NoContentDependency),
+                Absence::NoContentDependency,
+            ),
+        ] {
+            assert_eq!(file.sentences.len(), 2);
+            for s in &file.sentences {
+                let mdd = s
+                    .syntax
+                    .parsed_or_absence()
+                    .map(|p| p.mean_dependency_distance());
+                assert_eq!(mdd.map(|m| m.unwrap_err()), sentence, "{s:?}");
+            }
+            assert_eq!(file.mean_dependency_distance(), Err(whole));
+        }
+    }
+
+    /// Given an empty file
+    /// When it is analyzed with a parser
+    /// Then no sentence was parsed, so its MDD is absent for `NoParse`
+    #[test]
+    fn an_empty_file_has_no_parse() {
+        let file = analyze_parsed(
+            "",
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &mut ChainParser,
+        )
+        .unwrap();
+        assert_eq!(file.mean_dependency_distance(), Err(Absence::NoParse));
     }
 
     /// Given the NOMZ sentence
@@ -1040,6 +1160,25 @@ mod tests {
                 }
             }
             prop_assert_eq!(file.dependency_distance, Some(sum));
+        }
+
+        /// Given generated Markdown paragraphs and a parser that answers `TooLong` for a sentence
+        /// of more than k words and chains the words of every other
+        /// When the file is analyzed with it
+        /// Then its MDD is absent for `NoParse` exactly when no sentence was parsed; otherwise it
+        /// is the pooled distance's mean, absent for `NoContentDependency` when the parsed
+        /// sentences have no dependency
+        #[test]
+        fn file_mdd_is_pooled_or_names_why_it_is_absent(doc in document(), k in 0usize..12) {
+            let file = analyze_parsed(&doc, SourceFormat::Markdown, &thresholds(25), &mut TooLongParser(k)).unwrap();
+            let parsed: Vec<&SentenceSyntax> = file.sentences.iter().filter_map(|s| s.syntax.parsed()).collect();
+            let pooled: DependencyDistance = parsed.iter().map(|s| s.metrics.distance).sum();
+            let expected = if parsed.is_empty() {
+                Err(Absence::NoParse)
+            } else {
+                pooled.mean().ok_or(Absence::NoContentDependency)
+            };
+            prop_assert_eq!(file.mean_dependency_distance(), expected);
         }
 
         /// Given generated Markdown paragraphs and a parser that answers `TooLong` for a sentence

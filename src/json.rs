@@ -81,7 +81,7 @@ impl MetricsJson {
             flesch_kincaid_grade: score(|r| r.flesch_kincaid_grade),
             gunning_fog: score(|r| r.gunning_fog),
             average_sentence_length: score(|r| r.average_sentence_length),
-            mean_dependency_distance: s.mean_dependency_distance,
+            mean_dependency_distance: s.mean_dependency_distance.ok(),
             nominalizations: s.nominalizations.nominalizations,
             nominalization_ratio: s.nominalizations.ratio(),
             passives: s.passives,
@@ -284,7 +284,7 @@ mod tests {
                 prop_assert_eq!(&m["gunning_fog"], &number_or_null(s.readability.map(|r| r.gunning_fog)));
                 prop_assert_eq!(&m["nominalizations"], &Value::from(s.nominalizations.nominalizations));
                 prop_assert_eq!(&m["nominalization_ratio"], &number_or_null(s.nominalizations.ratio()));
-                prop_assert_eq!(&m["mean_dependency_distance"], &number_or_null(s.mean_dependency_distance));
+                prop_assert_eq!(&m["mean_dependency_distance"], &number_or_null(s.mean_dependency_distance.ok()));
                 prop_assert_eq!(&m["passives"], &s.passives.map_or(Value::Null, Value::from));
                 let listed = file["diagnostics"].as_array().unwrap();
                 prop_assert_eq!(listed.len(), report.diagnostics.len());

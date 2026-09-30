@@ -4,12 +4,11 @@
 
 use std::path::Path;
 
-use crate::analysis::{FileAnalysis, file_nominalizations, surface_counts};
+use crate::analysis::{Absence, FileAnalysis, file_nominalizations, surface_counts};
 use crate::block::Block;
 use crate::nominalization::NominalizationCount;
 use crate::prose::{SourceFormat, blocks, prose};
 use crate::readability::{Readability, SurfaceCounts, readability};
-use crate::syntax::DependencyDistance;
 use crate::words::count_words;
 
 /// How much prose one file holds, and how readable it is.
@@ -20,8 +19,8 @@ pub struct FileSummary {
     pub counts: SurfaceCounts,
     pub readability: Option<Readability>,
     pub nominalizations: NominalizationCount,
-    /// The file's mean dependency distance; `None` when nothing was parsed.
-    pub mean_dependency_distance: Option<f64>,
+    /// The file's mean dependency distance, or why it is absent.
+    pub mean_dependency_distance: Result<f64, Absence>,
     /// The file's passive constructions; `None` when no sentence was parsed.
     pub passives: Option<usize>,
 }
@@ -53,7 +52,7 @@ pub fn summarize(source: &str, format: SourceFormat) -> FileSummary {
         counts,
         readability: readability(counts),
         nominalizations: file_nominalizations(source, format),
-        mean_dependency_distance: None,
+        mean_dependency_distance: Err(Absence::NoParse),
         passives: None,
     }
 }
@@ -63,7 +62,7 @@ pub fn summarize(source: &str, format: SourceFormat) -> FileSummary {
 /// sentences are parsed once, for `file`; this adds no parse.
 pub fn with_parse(summary: FileSummary, file: &FileAnalysis) -> FileSummary {
     FileSummary {
-        mean_dependency_distance: file.dependency_distance.and_then(DependencyDistance::mean),
+        mean_dependency_distance: file.mean_dependency_distance(),
         passives: file.passives,
         nominalizations: file.nominalizations,
         ..summary
@@ -116,14 +115,24 @@ fn values(summary: &FileSummary) -> [String; METRICS.len()] {
         score(|r| r.flesch_kincaid_grade),
         score(|r| r.gunning_fog),
         score(|r| r.average_sentence_length),
-        summary
-            .mean_dependency_distance
-            .map_or_else(|| "absent (no parse)".to_owned(), |mdd| format!("{mdd:.2}")),
+        present_or_absent(
+            summary
+                .mean_dependency_distance
+                .map(|mdd| format!("{mdd:.2}")),
+        ),
         render_nominalizations(summary.nominalizations),
-        summary
-            .passives
-            .map_or_else(|| "absent (no parse)".to_owned(), |n| n.to_string()),
+        present_or_absent(
+            summary
+                .passives
+                .map(|n| n.to_string())
+                .ok_or(Absence::NoParse),
+        ),
     ]
+}
+
+/// A metric's rendered value, or `absent (<reason>)`.
+fn present_or_absent(value: Result<String, Absence>) -> String {
+    value.unwrap_or_else(|absence| format!("absent ({absence})"))
 }
 
 fn render_nominalizations(n: NominalizationCount) -> String {
@@ -297,7 +306,7 @@ mod tests {
             counts: SurfaceCounts::default(),
             readability: None,
             nominalizations: NominalizationCount::default(),
-            mean_dependency_distance: None,
+            mean_dependency_distance: Err(Absence::NoParse),
             passives: None,
         };
         assert_eq!(
@@ -335,7 +344,7 @@ mod tests {
                 nominalizations: 5,
                 words: 100,
             },
-            mean_dependency_distance: None,
+            mean_dependency_distance: Err(Absence::NoParse),
             passives: None,
         };
         assert_eq!(
@@ -470,7 +479,7 @@ mod tests {
             let file = parsed(&md);
             let summary = with_parse(surface, &file);
             prop_assert_eq!(summary, FileSummary {
-                mean_dependency_distance: file.dependency_distance.and_then(|d| d.mean()),
+                mean_dependency_distance: file.mean_dependency_distance(),
                 passives: file.passives,
                 nominalizations: file.nominalizations,
                 ..surface
@@ -488,7 +497,7 @@ mod tests {
         let summary = with_parse(surface, &parsed(crate::testing::NOMZ_TEXT));
         assert_eq!(surface.nominalizations.nominalizations, 4);
         assert_eq!(summary.nominalizations.nominalizations, 3);
-        assert!(summary.mean_dependency_distance.is_some());
+        assert!(summary.mean_dependency_distance.is_ok());
         assert_eq!(summary.passives, Some(0));
     }
 
@@ -514,6 +523,31 @@ mod tests {
             Some("absent (no parse)"),
             "{rendered}"
         );
+    }
+
+    /// Given `Go.` and `Stop!`, and `Yes no.` (two content tokens), each parsed without a
+    /// content dependency
+    /// When the summary takes that parse and is rendered
+    /// Then the file was parsed, so its mean dependency distance reads `absent (no content
+    /// dependency)`, not `absent (no parse)` (File metrics, M3a)
+    #[test]
+    fn a_parsed_file_without_content_dependency_names_that_reason() {
+        for source in ["Go.\n\nStop!\n", "Yes no.\n"] {
+            let file = crate::analysis::analyze_parsed(
+                source,
+                SourceFormat::Markdown,
+                &THRESHOLDS,
+                &mut crate::testing::ProjectedRoots,
+            )
+            .unwrap();
+            let summary = with_parse(summarize(source, SourceFormat::Markdown), &file);
+            let rendered = render(Path::new("go.md"), &summary);
+            assert_eq!(
+                row(&rendered, "mean dependency distance"),
+                Some("absent (no content dependency)"),
+                "{rendered}"
+            );
+        }
     }
 
     /// Given the NOMZ sentence

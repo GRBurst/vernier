@@ -7,7 +7,7 @@ use std::ops::Range;
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 
 use crate::analysis::{
-    FileAnalysis, Flag, SentenceAnalysis, SentenceSyntax, SyntacticFlag, Syntax, Thresholds,
+    Absence, FileAnalysis, Flag, SentenceAnalysis, SentenceSyntax, SyntacticFlag, Thresholds,
 };
 use crate::position::{LineIndex, Position, PositionError};
 
@@ -131,7 +131,8 @@ const RENDER_WIDTH: usize = 100_000;
 /// The rule metrics of a sentence, one line each: words, mean dependency distance, tree depth,
 /// subordinate clauses, then one line per center-embedding (or `none`); a syntactic metric of an
 /// unparsed sentence is `absent (no parse)`, of one too long for the model `absent (too long for
-/// the model)`.
+/// the model)`, and the mean dependency distance of a parsed sentence without a content
+/// dependency `absent (no content dependency)`.
 pub fn metric_lines(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec<String> {
     let words = sentence.counts.words;
     let long = sentence.flags.contains(&Flag::LongSentence);
@@ -140,10 +141,9 @@ pub fn metric_lines(sentence: &SentenceAnalysis, thresholds: &Thresholds) -> Vec
         raised(long, "LongSentence"),
         thresholds.max_sentence_len
     );
-    let syntactic = match &sentence.syntax {
-        Syntax::Unparsed => absent_lines("no parse"),
-        Syntax::TooLong { .. } => absent_lines("too long for the model"),
-        Syntax::Parsed(syntax) => parsed_lines(syntax, thresholds),
+    let syntactic = match sentence.syntax.parsed_or_absence() {
+        Ok(syntax) => parsed_lines(syntax, thresholds),
+        Err(absence) => absent_lines(absence),
     };
     std::iter::once(head).chain(syntactic).collect()
 }
@@ -156,10 +156,10 @@ const ABSENT_WITHOUT_PARSE: [&str; 4] = [
     "center-embedding",
 ];
 
-/// Every syntactic metric line as absent, for `reason`.
-fn absent_lines(reason: &str) -> Vec<String> {
+/// Every syntactic metric line as absent, for `absence`.
+fn absent_lines(absence: Absence) -> Vec<String> {
     ABSENT_WITHOUT_PARSE
-        .map(|name| format!("{name}: absent ({reason})"))
+        .map(|name| format!("{name}: absent ({absence})"))
         .to_vec()
 }
 
@@ -175,8 +175,8 @@ fn raised(is_raised: bool, name: &str) -> String {
 fn parsed_lines(syntax: &SentenceSyntax, thresholds: &Thresholds) -> Vec<String> {
     let has = |wanted: fn(&SyntacticFlag) -> bool| syntax.flags.iter().any(wanted);
     let metrics = &syntax.metrics;
-    let mdd = metrics.mdd().map_or_else(
-        || "mean dependency distance: absent (fewer than 2 content tokens)".to_owned(),
+    let mdd = syntax.mean_dependency_distance().map_or_else(
+        |absence| format!("mean dependency distance: absent ({absence})"),
         |mdd| {
             let high = has(|f| matches!(f, SyntacticFlag::HighMdd { .. }));
             format!(
@@ -298,14 +298,14 @@ fn syntactic_message(flag: &SyntacticFlag, thresholds: &Thresholds) -> FlagMessa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::{analyze, syntactic_flags};
-    use crate::dependency::DependencyTree;
+    use crate::analysis::{Syntax, analyze, syntactic_flags};
+    use crate::dependency::{DependencyTree, Parse, Parser};
     use crate::nominalization::NominalizationCount;
     use crate::prose::SourceFormat;
     use crate::readability::SurfaceCounts;
     use crate::syntax::syntactic_metrics;
     use crate::syntax::{CenterEmbedding, DependencyDistance, SyntacticMetrics};
-    use crate::testing::{EXAMPLE_CONLLU, tokens_from_conllu};
+    use crate::testing::{EXAMPLE_CONLLU, ProjectedRoots, tokens_from_conllu};
     use proptest::prelude::*;
 
     const THRESHOLDS: Thresholds = Thresholds {
@@ -600,6 +600,27 @@ mod tests {
         assert!(flag_messages(&sentence, &THRESHOLDS).is_empty());
     }
 
+    /// Given `Yes no.` parsed with both content tokens headed by the punctuation root (two
+    /// content tokens, both projected roots, so no content dependency)
+    /// When its metric lines are listed
+    /// Then its mean dependency distance reads `absent (no content dependency)`, not a claim
+    /// about its number of content tokens, and its tree has depth 0
+    #[test]
+    fn a_parsed_sentence_without_content_dependency_names_that_reason() {
+        let Ok(Parse::Tokens(tokens)) = ProjectedRoots.parse("Yes no.") else {
+            unreachable!("ProjectedRoots always gives tokens")
+        };
+        let tree = DependencyTree::new(tokens).unwrap();
+        let sentence = measured(2, Some(syntactic_metrics(&tree)), &THRESHOLDS);
+        assert_eq!(
+            metric_lines(&sentence, &THRESHOLDS)[1..3],
+            [
+                "mean dependency distance: absent (no content dependency)",
+                "tree depth: 0 edges (max 5)",
+            ]
+        );
+    }
+
     fn metrics_or_none() -> impl Strategy<Value = Option<SyntacticMetrics>> {
         let embedding = (0usize..12).prop_map(|words_between| CenterEmbedding {
             subject: "proposal".to_owned(),
@@ -645,7 +666,8 @@ mod tests {
         /// When its metric lines are listed
         /// Then the words line names LongSentence exactly when the words exceed the maximum; an
         /// unparsed sentence has its four syntactic lines absent (no parse), one too long for the
-        /// model absent (too long for the model); a parsed one names HighMdd,
+        /// model absent (too long for the model); a parsed one has its mean dependency distance
+        /// absent (no content dependency) exactly when it has no MDD, and names HighMdd,
         /// DeepTree and ClauseOverload exactly when it raised them, and lists one center-embedding
         /// line per CenterEmbedding flag
         #[test]
@@ -681,6 +703,7 @@ mod tests {
                 Syntax::Parsed(syntax) => {
                     let raised = |name: &str| syntax.flags.iter().any(|f| syntactic_message(f, &t).name == name);
                     prop_assert_eq!(lines[1].contains("HighMdd"), raised("HighMdd"), "{}", lines[1]);
+                    prop_assert_eq!(lines[1] == "mean dependency distance: absent (no content dependency)", mdd.is_none(), "{}", lines[1]);
                     prop_assert_eq!(lines[2].contains("DeepTree"), raised("DeepTree"), "{}", lines[2]);
                     prop_assert_eq!(lines[3].contains("ClauseOverload"), raised("ClauseOverload"), "{}", lines[3]);
                     let embedded = syntax.flags.iter().filter(|f| matches!(f, SyntacticFlag::CenterEmbedding(_))).count();
