@@ -15,9 +15,9 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Report the metrics of each file; always exits 0 on readable files.
+    /// Report the metrics of each file; exits 0, or 2 on an error.
     Analyze(Args),
-    /// Lint each file; exits 1 when a sentence is flagged.
+    /// Lint each file; exits 1 when a sentence is flagged, 2 on an error.
     Check(Args),
 }
 
@@ -36,7 +36,7 @@ pub struct Args {
     /// Flag a sentence whose mean dependency distance exceeds this (HighMdd).
     #[arg(long, default_value_t = 3.0, value_parser = parse_max_mdd)]
     pub max_mdd: f64,
-    /// Flag a sentence whose dependency tree is deeper than this, counting edges from the root (DeepTree).
+    /// Flag a sentence whose dependency tree is deeper than this, counting edges from a projected root (DeepTree).
     #[arg(long, default_value_t = 5)]
     pub max_tree_depth: usize,
     /// Flag a sentence with more subordinate clauses than this (ClauseOverload).
@@ -179,7 +179,7 @@ mod tests {
 
     /// Given the rendered help of both commands
     /// When the `--max-tree-depth` help text is read
-    /// Then it says that depth counts edges
+    /// Then it says that depth counts edges from a projected root (spec 001 M3a criterion 4)
     #[test]
     fn max_tree_depth_help_says_edges() {
         use clap::CommandFactory;
@@ -194,7 +194,27 @@ mod tests {
                 .map(ToString::to_string)
                 .unwrap_or_default();
             assert!(help.contains("edges"), "{command}: {help:?}");
+            assert!(
+                help.contains("from a projected root"),
+                "{command}: {help:?}"
+            );
         }
+    }
+
+    /// Given the command list
+    /// When the `analyze` summary is read
+    /// Then it does not promise exit 0, which an unparsable sentence or a failed write breaks
+    /// (spec 001 M5 criterion 2)
+    #[test]
+    fn analyze_help_names_exit_2() {
+        use clap::CommandFactory;
+        let about = Cli::command()
+            .find_subcommand("analyze")
+            .and_then(|c| c.get_about())
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        assert!(!about.contains("always"), "{about:?}");
+        assert!(about.contains("2 on an error"), "{about:?}");
     }
 
     /// Given a command without files
