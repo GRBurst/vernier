@@ -4,7 +4,7 @@
 use proptest::prelude::*;
 use proptest::sample::Index;
 
-use crate::dependency::Token;
+use crate::dependency::{Parse, Parser, Token};
 
 /// The tokens of a CoNLL-U sentence: every line starting with a digit, except multiword ranges
 /// (`7-8`) and empty nodes (`8.1`), columns ID FORM LEMMA
@@ -115,6 +115,21 @@ pub(crate) const PASSIVE_CONLLU: &str = "\
 13	rejected	reject	VERB	VBN	Tense=Past|VerbForm=Part|Voice=Pass	4	advcl	_	SpaceAfter=No
 14	.	.	PUNCT	.	_	4	punct	_	SpaceAfter=No
 ";
+
+/// Finds every sentence too long for the model: 600 subword pieces, the tested model's maximum
+/// 509 (spec 001 M3b).
+pub(crate) struct EveryTooLong;
+
+impl Parser for EveryTooLong {
+    type Error = std::convert::Infallible;
+
+    fn parse(&mut self, _sentence: &str) -> Result<Parse, Self::Error> {
+        Ok(Parse::TooLong {
+            pieces: 600,
+            max: 509,
+        })
+    }
+}
 
 const DEPRELS: [&str; 13] = [
     "nsubj",

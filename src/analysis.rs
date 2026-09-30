@@ -94,8 +94,9 @@ pub struct SentenceAnalysis {
 }
 
 /// One file's sentences, the sum of their counts, and the file's scores computed from that sum;
-/// `dependency_distance` and `passives` sum the parsed sentences' and are `None` when no parser
-/// ran.
+/// `dependency_distance` sums the parsed sentences' and is `None` when no parser ran;
+/// `passives` sums the parsed sentences' and is `None` when no sentence was parsed (no parser
+/// ran, or every sentence was too long for the model).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileAnalysis {
     pub spans: usize,
@@ -133,7 +134,8 @@ pub fn analyze(source: &str, format: SourceFormat, thresholds: &Thresholds) -> F
 
 /// Analyzes `source` like `analyze`, and also parses every sentence's text once with `parser`
 /// to add its syntactic metrics and flags (or that it is too long for the model), and the file's
-/// dependency distance and passives summed over the parsed sentences.
+/// dependency distance and passives summed over the parsed sentences (passives absent when no
+/// sentence was parsed).
 pub fn analyze_parsed<P: Parser>(
     source: &str,
     format: SourceFormat,
@@ -143,12 +145,17 @@ pub fn analyze_parsed<P: Parser>(
     let file = analyze_with(source, format, thresholds, |sentence, stoplist| {
         parse_sentence(sentence, thresholds, stoplist, parser)
     })?;
-    let parsed = file.sentences.iter().filter_map(|s| s.syntax.parsed());
-    let dependency_distance = parsed.clone().map(|syntax| syntax.metrics.distance).sum();
-    let passives = parsed.map(|syntax| syntax.passives.len()).sum();
+    let parsed: Vec<&SentenceSyntax> = file
+        .sentences
+        .iter()
+        .filter_map(|s| s.syntax.parsed())
+        .collect();
+    let dependency_distance = parsed.iter().map(|syntax| syntax.metrics.distance).sum();
+    // why: a count over no parsed sentence is not 0 passives; passive voice is then absent (M4).
+    let passives = (!parsed.is_empty()).then(|| parsed.iter().map(|s| s.passives.len()).sum());
     Ok(FileAnalysis {
         dependency_distance: Some(dependency_distance),
-        passives: Some(passives),
+        passives,
         ..file
     })
 }
@@ -376,8 +383,8 @@ mod tests {
     use super::*;
     use crate::nominalization::{parsed_nominalizations, surface_lemma};
     use crate::testing::{
-        EXAMPLE_CONLLU, EXAMPLE_TEXT, NOMZ_CONLLU, NOMZ_TEXT, PASSIVE_CONLLU, PASSIVE_TEXT,
-        tokens_from_conllu,
+        EXAMPLE_CONLLU, EXAMPLE_TEXT, EveryTooLong, NOMZ_CONLLU, NOMZ_TEXT, PASSIVE_CONLLU,
+        PASSIVE_TEXT, tokens_from_conllu,
     };
     use crate::words::count_words;
     use proptest::prelude::*;
@@ -651,6 +658,24 @@ mod tests {
         );
     }
 
+    /// Given the PASSIVE sentence, whose parse holds 2 passives, and a parser that finds every
+    /// sentence too long for the model
+    /// When the file is analyzed with that parser
+    /// Then no sentence was parsed, so the file's passive voice is absent, not zero (M4)
+    #[test]
+    fn passive_voice_is_absent_when_every_sentence_is_too_long() {
+        let file = analyze_parsed(
+            &format!("{PASSIVE_TEXT}\n\n{PASSIVE_TEXT}"),
+            SourceFormat::Markdown,
+            &thresholds(25),
+            &mut EveryTooLong,
+        )
+        .unwrap();
+        assert_eq!(file.sentences.len(), 2);
+        assert!(file.sentences.iter().all(|s| s.syntax.parsed().is_none()));
+        assert_eq!(file.passives, None);
+    }
+
     /// Given the NOMZ sentence
     /// When it is analyzed without a parse
     /// Then it has 4 nominalizations of 14 words (commission, decisions, implementation,
@@ -745,6 +770,21 @@ mod tests {
                 }
             }
             Ok(Parse::Tokens(tokens))
+        }
+    }
+
+    /// Answers `TooLong` for a sentence of more than `.0` whitespace-separated words, and parses
+    /// every other like `PassiveChainParser`.
+    struct TooLongPassiveParser(usize);
+
+    impl Parser for TooLongPassiveParser {
+        type Error = Unparsable;
+
+        fn parse(&mut self, sentence: &str) -> Result<Parse, Unparsable> {
+            match TooLongParser(self.0).parse(sentence)? {
+                Parse::Tokens(_) => PassiveChainParser.parse(sentence),
+                too_long @ Parse::TooLong { .. } => Ok(too_long),
+            }
         }
     }
 
@@ -1002,6 +1042,20 @@ mod tests {
             prop_assert_eq!(file.dependency_distance, Some(sum));
         }
 
+        /// Given generated Markdown paragraphs and a parser that answers `TooLong` for a sentence
+        /// of more than k words and marks passives in every other
+        /// When the file is analyzed with it
+        /// Then the file's passive voice is present exactly when at least one sentence was
+        /// parsed, and then it is the sum of the parsed sentences' passives (M4)
+        #[test]
+        fn passive_voice_is_present_exactly_when_a_sentence_was_parsed(doc in nominal_document(), k in 0usize..12) {
+            let mut parser = TooLongPassiveParser(k);
+            let file = analyze_parsed(&doc, SourceFormat::Markdown, &thresholds(25), &mut parser).unwrap();
+            let parsed: Vec<&SentenceSyntax> = file.sentences.iter().filter_map(|s| s.syntax.parsed()).collect();
+            let expected = (!parsed.is_empty()).then(|| parsed.iter().map(|s| s.passives.len()).sum());
+            prop_assert_eq!(file.passives, expected);
+        }
+
         /// Given generated paragraphs with nominalizations
         /// When the file is analyzed without a parse
         /// Then each sentence counts the nominalizations among its words over its M2 words, the
@@ -1024,7 +1078,7 @@ mod tests {
         /// Given generated paragraphs with nominalizations, and a parser that marks passives
         /// When the file is analyzed with and without it
         /// Then without it passive voice is absent; with it the file counts the sentences'
-        /// passives, each at its verb in the source or at the sentence start when the verb's form
+        /// passives (absent in a file without sentences, where none was parsed), each at its verb in the source or at the sentence start when the verb's form
         /// is not in the text (both occur), and nominalizations come from the parse over M2 words
         #[test]
         fn parsed_passives_and_nominalizations_add_up(doc in nominal_document()) {
@@ -1047,7 +1101,8 @@ mod tests {
                 prop_assert_eq!(s.nominalizations.nominalizations, parsed_nominalizations(&tokens, &Stoplist::committed()));
                 prop_assert_eq!(s.nominalizations.words, s.counts.words);
             }
-            prop_assert_eq!(file.passives, Some(passives));
+            // why: every sentence is parsed, so passive voice is absent only in a file with none.
+            prop_assert_eq!(file.passives, (!file.sentences.is_empty()).then_some(passives));
             let sum: NominalizationCount = file.sentences.iter().map(|s| s.nominalizations).sum();
             prop_assert_eq!(file.nominalizations, sum);
             prop_assert_eq!(file.nominalizations.words, file.totals.words);

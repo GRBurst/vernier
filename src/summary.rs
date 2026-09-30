@@ -22,7 +22,7 @@ pub struct FileSummary {
     pub nominalizations: NominalizationCount,
     /// The file's mean dependency distance; `None` when nothing was parsed.
     pub mean_dependency_distance: Option<f64>,
-    /// The file's passive constructions; `None` when nothing was parsed.
+    /// The file's passive constructions; `None` when no sentence was parsed.
     pub passives: Option<usize>,
 }
 
@@ -490,6 +490,30 @@ mod tests {
         assert_eq!(summary.nominalizations.nominalizations, 3);
         assert!(summary.mean_dependency_distance.is_some());
         assert_eq!(summary.passives, Some(0));
+    }
+
+    /// Given the PASSIVE sentence and a parser that finds every sentence too long for the model
+    /// When its summary takes that parse and is rendered
+    /// Then no sentence was parsed, so passive voice is absent, not zero, and its row says
+    /// `absent (no parse)` (M4)
+    #[test]
+    fn passive_voice_is_absent_when_every_sentence_is_too_long() {
+        let source = crate::testing::PASSIVE_TEXT;
+        let file = crate::analysis::analyze_parsed(
+            source,
+            SourceFormat::Markdown,
+            &THRESHOLDS,
+            &mut crate::testing::EveryTooLong,
+        )
+        .unwrap();
+        let summary = with_parse(summarize(source, SourceFormat::Markdown), &file);
+        assert_eq!(summary.passives, None);
+        let rendered = render(Path::new("p.md"), &summary);
+        assert_eq!(
+            row(&rendered, "passive voice"),
+            Some("absent (no parse)"),
+            "{rendered}"
+        );
     }
 
     /// Given the NOMZ sentence

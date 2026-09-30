@@ -7,3 +7,4 @@
 cc ad5cd4aae0aa6380fd227e004f4bc037ff110f69f540c89e23823efbeb9d2f97 # shrinks to n = 1, max = 0
 cc 23af0289d50144bb987838fcef89510346321a9854cad9fb155aec7aedf99613 # shrinks to doc = "", max = 0
 cc 2eb74cb5a419c8672f7b36eadca05f9d6e093640626803acff6e1fec011705d1 # shrinks to n = 22, max = 22
+cc 9443e5a3da772692b8950ed8a68c7c7a516093b7e6ace82b72261cd3efb666a5 # shrinks to doc = ""

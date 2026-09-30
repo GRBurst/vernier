@@ -196,6 +196,28 @@ mod tests {
         assert_eq!(metrics["passives"], Value::Null);
     }
 
+    /// Given the PASSIVE sentence and a parser that finds every sentence too long for the model
+    /// When the JSON document of its summary with that parse is written
+    /// Then no sentence was parsed, so `passives` is null, not 0 (M4)
+    #[test]
+    fn passives_are_null_when_every_sentence_is_too_long() {
+        let source = crate::testing::PASSIVE_TEXT;
+        let file = crate::analysis::analyze_parsed(
+            source,
+            SourceFormat::Markdown,
+            &THRESHOLDS,
+            &mut crate::testing::EveryTooLong,
+        )
+        .unwrap();
+        let summary = crate::summary::with_parse(summarize(source, SourceFormat::Markdown), &file);
+        let value = parsed(&[FileReport {
+            path: "p.md".to_owned(),
+            summary: &summary,
+            diagnostics: &[],
+        }]);
+        assert_eq!(value["files"][0]["metrics"]["passives"], Value::Null);
+    }
+
     /// The long fixture's diagnostic: at 3:20, with code, severity, title and its flag.
     fn assert_the_long_sentence(d: &Value) {
         assert_eq!(
