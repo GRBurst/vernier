@@ -46,7 +46,8 @@ pub enum LabelError {
     #[error("no non-negative integer \"{key}\"")]
     MissingKey { key: &'static str },
     #[error(
-        "\"max_position_embeddings\" {positions} leaves no position after \"pad_token_id\" {pad}"
+        "\"max_position_embeddings\" {positions} leaves no subword piece after \"pad_token_id\" \
+         {pad}: it must be greater than \"pad_token_id\" + 4"
     )]
     NoPositions { positions: usize, pad: usize },
 }
@@ -136,14 +137,15 @@ impl ModelLimits {
     }
 }
 
-/// The input limits of a model's `config.json`.
+/// The input limits of a model's `config.json`, which must leave room for at least one subword
+/// piece: `max_position_embeddings` > `pad_token_id` + 4.
 pub fn limits_from_config(json: &str) -> Result<ModelLimits, LabelError> {
     let config: Value = serde_json::from_str(json)?;
     let positions = count(&config, "max_position_embeddings")?;
     let pad = count(&config, "pad_token_id")?;
     let max_positions = positions
         .checked_sub(pad + 1)
-        .filter(|&max| max > 0)
+        .filter(|&max| max > ROW_EXTRA)
         .ok_or(LabelError::NoPositions { positions, pad })?;
     Ok(ModelLimits { max_positions })
 }
@@ -580,7 +582,7 @@ mod tests {
 
     /// Given the model's `max_position_embeddings` 514 and `pad_token_id` 1, and broken limits
     /// When the limits are read
-    /// Then 512 positions remain; a missing key or no position left is refused
+    /// Then 512 positions remain; a missing key or no piece left is refused
     #[test]
     fn reads_the_models_position_limit() {
         assert_eq!(
@@ -606,6 +608,32 @@ mod tests {
                 pad: 1
             })
         ));
+    }
+
+    /// Given `max_position_embeddings` from 0 to 11 above `pad_token_id` (0 to 3)
+    /// When the limits are read
+    /// Then they are accepted exactly when `max_position_embeddings` > `pad_token_id` + 4, and
+    /// the limit is then `max_position_embeddings − pad_token_id − 4`, at least 1; a model
+    /// whose limit would be 0 or less is unusable (Definitions, *Model*; M3b criterion 1)
+    #[test]
+    fn a_limit_below_one_piece_is_refused() {
+        for pad in 0..4_usize {
+            for positions in pad..pad + 12 {
+                let json =
+                    format!(r#"{{"max_position_embeddings": {positions}, "pad_token_id": {pad}}}"#);
+                match limits_from_config(&json) {
+                    Ok(limits) => {
+                        assert!(positions > pad + 4, "{positions} {pad}");
+                        assert_eq!(limits.max_pieces(), positions - pad - 4);
+                        assert!(limits.max_pieces() >= 1);
+                    }
+                    Err(LabelError::NoPositions { .. }) => {
+                        assert!(positions <= pad + 4, "{positions} {pad}");
+                    }
+                    Err(other) => panic!("{positions} {pad}: {other:?}"),
+                }
+            }
+        }
     }
 
     /// Given the model's 512 positions

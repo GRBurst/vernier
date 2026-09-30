@@ -365,6 +365,24 @@ fn a_model_without_its_tokenizer_is_named_and_exits_2() {
     );
 }
 
+/// Given a model whose `max_position_embeddings` is `pad_token_id` + 4 (a limit of 0 subword
+/// pieces), with every other file present and a runtime library that does not exist
+/// When `vernier` runs with it
+/// Then stderr names `config.json` as unusable, no file is processed and it exits 2 (M3b 1, 6)
+#[test]
+fn a_model_without_room_for_a_piece_is_named_and_exits_2() {
+    let config = CONFIG.replace("514", "5");
+    let dir = model_dir(
+        "no-room",
+        &[
+            ("config.json", &config),
+            ("tokenizer.json", TOKENIZER),
+            ("onnx/model.onnx", "not a model"),
+        ],
+    );
+    assert_load_fails(&dir, &dir.join("no-such-lib.so"), &dir.join("config.json"));
+}
+
 /// A shared library other than ONNX Runtime: one this test process has loaded (Linux), else a
 /// file that is not a library at all.
 // why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
