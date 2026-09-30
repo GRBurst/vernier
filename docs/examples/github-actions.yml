@@ -1,9 +1,9 @@
 # Run vernier as a CI gate (spec 001 M5). Copy this file to `.github/workflows/prose.yml` in the
 # repository whose prose you want to check.
 #
-# `vernier check` exits 1 when a sentence is flagged and 2 when a file cannot be read; GitHub
-# Actions fails a step on any non-zero exit, so either fails the job. Do not append `|| true` or
-# set `continue-on-error`, or the job passes whatever vernier finds.
+# `vernier check` exits 1 when a sentence is flagged and 2 on any error (spec 001 M5 criterion 2);
+# GitHub Actions fails a step on any non-zero exit, so either fails the job. Do not append
+# `|| true` or set `continue-on-error`, or the job passes whatever vernier finds.
 name: prose
 
 on: [push, pull_request]
