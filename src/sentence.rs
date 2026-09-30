@@ -198,6 +198,17 @@ mod tests {
         );
     }
 
+    /// Given a listed abbreviation followed by a closing bracket, `etc.)`, before the next sentence
+    /// When it is split into sentences
+    /// Then it ends the sentence: only leading punctuation is stripped before the list is matched
+    #[test]
+    fn an_abbreviation_before_a_closing_bracket_ends_the_sentence() {
+        assert_eq!(
+            split_md("We bought pears (and apples, etc.) Then we left."),
+            ["We bought pears (and apples, etc.)", "Then we left."]
+        );
+    }
+
     /// Given a paragraph ending in an abbreviation, and one of punctuation only after a sentence
     /// When it is split into sentences
     /// Then the trailing abbreviation stays in the last sentence and no sentence without a word is kept

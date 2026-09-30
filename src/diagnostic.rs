@@ -657,6 +657,26 @@ mod tests {
         assert_eq!(text.lines().nth(1).map(str::trim), Some("--> long.md:3:20"));
     }
 
+    /// Given a sentence opening with two wide characters, `漢字 is here now.` (15 Unicode scalar
+    /// values, 17 display columns)
+    /// When its diagnostic is rendered as text
+    /// Then its column and end column count scalar values (1 and 16), while the underline counts
+    /// display columns: 17 carets, a wide character taking two (M5 criteria 1 and 6)
+    #[test]
+    fn the_underline_counts_display_columns() {
+        let source = "漢字 is here now.\n";
+        let t = Thresholds {
+            max_sentence_len: 0,
+            ..THRESHOLDS
+        };
+        let file = analyze(source, SourceFormat::PlainText, &t);
+        let found = diagnostics(source, &file, &t).unwrap();
+        assert_eq!((found[0].start.column(), found[0].end.column()), (1, 16));
+        let text = render_text("s.txt", source, &found[0], Style::Plain);
+        let marker = text.lines().find(|l| l.contains('^')).unwrap();
+        assert_eq!(marker.chars().filter(|&c| c == '^').count(), 17, "{text}");
+    }
+
     /// A sentence of `words` words with the flags `analyze` would give it under `t`, parsed into
     /// `metrics` or not parsed.
     fn measured(
