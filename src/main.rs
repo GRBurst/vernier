@@ -137,15 +137,7 @@ fn process(
         }
     };
     for skipped in &report.too_long {
-        eprintln!(
-            "vernier: {}:{}:{}: sentence too long for the model ({} subword pieces, max {}); \
-             syntactic metrics skipped",
-            path.display(),
-            skipped.at.line(),
-            skipped.at.column(),
-            skipped.pieces,
-            skipped.max
-        );
+        eprintln!("{}", too_long_notice(path, skipped));
     }
     let outcome = match mode {
         Mode::Check if !report.diagnostics.is_empty() => FileOutcome::Flagged,
@@ -213,6 +205,19 @@ fn too_long(source: &str, analysis: &FileAnalysis) -> Result<Vec<TooLong>, Posit
             })
         })
         .collect()
+}
+
+/// The stderr notice for a sentence of `path` too long for the model (spec 001 M3b criterion 1).
+fn too_long_notice(path: &Path, skipped: &TooLong) -> String {
+    format!(
+        "vernier: {}:{}:{}: sentence too long for the model ({} subword pieces, max {}); \
+         syntactic metrics skipped",
+        path.display(),
+        skipped.at.line(),
+        skipped.at.column(),
+        skipped.pieces,
+        skipped.max
+    )
 }
 
 /// What stderr says when `path` could not be reported: the sentence that could not be located,
@@ -353,6 +358,36 @@ mod tests {
             .map(|t| (t.at.line(), t.at.column(), t.pieces, t.max))
             .collect();
         assert_eq!(skipped, [(3, 1, 7, 1), (3, 16, 7, 1), (5, 3, 7, 1)]);
+    }
+
+    /// Given a file of three sentences, each too long for the model (7 subword pieces, max 1)
+    /// When the file is examined and a notice is written for each sentence it skipped
+    /// Then there is one notice per sentence, in the spec's wording, at the sentence's first
+    /// character, with its pieces and the model's maximum (M3b criterion 1)
+    #[test]
+    fn each_too_long_sentence_gets_the_specified_notice() {
+        let mut parser = CountingParser {
+            pieces: 7,
+            calls: 0,
+        };
+        let Ok(report) = examine(&args(), Path::new("x.md"), SOURCE, Some(&mut parser)) else {
+            panic!("examine failed");
+        };
+        let notices: Vec<String> = report
+            .too_long
+            .iter()
+            .map(|skipped| too_long_notice(Path::new("x.md"), skipped))
+            .collect();
+        let expected: Vec<String> = [(3, 1), (3, 16), (5, 3)]
+            .iter()
+            .map(|(line, column)| {
+                format!(
+                    "vernier: x.md:{line}:{column}: sentence too long for the model \
+                     (7 subword pieces, max 1); syntactic metrics skipped"
+                )
+            })
+            .collect();
+        assert_eq!(notices, expected);
     }
 
     /// Given a file whose first sentence the parser fails on

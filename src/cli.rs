@@ -1,5 +1,5 @@
-//! The command line (spec 001 M1): both commands accept every M5 flag from M1 on,
-//! even where a flag has no effect yet.
+//! The command line (spec 001 M1, M5 criterion 8): both commands accept the same files and
+//! flags.
 
 use std::path::PathBuf;
 

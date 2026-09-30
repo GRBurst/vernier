@@ -150,15 +150,14 @@ Compute the dependency metrics as pure functions over a list of tokens, tested o
 - [x] THE depth of every well-formed tree with N ≥ 1 content tokens SHALL be at most N − 1, and its MDD, where present, at least 1 (property test over generated trees).
 - [x] WHEN MDD exceeds `--max-mdd` (default 3.0), depth exceeds `--max-tree-depth` (default 5), or the clause count exceeds `--max-clauses` (default 2), THE engine SHALL flag the sentence with `HighMdd`, `DeepTree` or `ClauseOverload`; center-embedding SHALL be flagged `CenterEmbedding`.
 
-## M3b — Parser integration and model handling (Status: IN PROGRESS)
+## M3b — Parser integration and model handling (Status: IMPLEMENTED)
 <a id="M3b"></a>
 
 Put a real Universal Dependencies parser behind the `Parser` trait: the ONNX model of Definitions, run by ONNX Runtime through `ort`, the route a spike chose (Provenance).
-Status `IN PROGRESS` since review pass 1 (2026-09-30): the too-long criterion's stderr notice has no automated test yet.
 
 **Acceptance Criteria:**
 
-- [ ] WHEN a sentence has more subword pieces than the model takes (the limit is `max_position_embeddings − pad_token_id − 4`, read from the model's `config.json`: 509 for the tested model), THE tool SHALL keep the sentence's surface metrics and flags, skip its syntactic metrics, print one notice on stderr, `vernier: PATH:LINE:COL: sentence too long for the model (N subword pieces, max M); syntactic metrics skipped`, with the position of the sentence's first character, and list its syntactic metrics in a diagnostic as `absent (too long for the model)`; the sentence does not change the exit code.
+- [x] WHEN a sentence has more subword pieces than the model takes (the limit is `max_position_embeddings − pad_token_id − 4`, read from the model's `config.json`: 509 for the tested model), THE tool SHALL keep the sentence's surface metrics and flags, skip its syntactic metrics, print one notice on stderr, `vernier: PATH:LINE:COL: sentence too long for the model (N subword pieces, max M); syntactic metrics skipped`, with the position of the sentence's first character, and list its syntactic metrics in a diagnostic as `absent (too long for the model)`; the sentence does not change the exit code.
 - [x] THE README and this spec SHALL state the license of the chosen model and that part of its training data is licensed non-commercially. The chosen model, `ghotriw/roberta-base-english-ud-goeswith-onnx` (ONNX export of `KoichiYasuoka/roberta-base-english-ud-goeswith`), is declared MIT, but it is trained on UD English EWT and Atis (CC BY-SA 4.0) and on GUM, ParTUT and LinES (CC BY-NC-SA 4.0), so vernier treats it as non-commercial ([research/licenses.md](research/licenses.md)).
 - [x] WHEN `--model-path` names a model, THE tool SHALL parse each sentence once and compute the M3a metrics of every sentence within the model's limit from the result.
 - [x] WHEN the parsed M3a example sentence is analyzed, THE tool SHALL report center-embedding with subject "proposal" and verb "caused" (integration test in `tests/model.rs`, run when `VERNIER_TEST_MODEL` names a model: skipped with a printed reason when it is unset, failing when it is set but the model is unusable).
