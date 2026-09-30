@@ -95,24 +95,27 @@ VERNIER_TEST_MODEL=$PWD/.sdd/m3b-spike/models/rbeg-onnx cargo test --release --t
 
 ## Open tasks
 
-- Phase 2 for spec 001 is owed (BACKLOG item 2).
+- Phase 2 for spec 001: review gate stopped after pass 4 (FAILED, residue in `gates.md`); Clarification (8 markers), Spec-Approval and Comprehension owed (BACKLOG item 2).
 - User review of M1, M2, M3a, M3b, M4 and M5 → `DONE`. By hand:
   - M5 colour on a real terminal (`cargo run -- check tests/fixtures/long.md`, then with `NO_COLOR=1`: same text; the sandbox has no PTY);
-  - the GitHub Actions example in a real repository (install source has an `OWNER` placeholder);
+  - the GitHub Actions example in a real repository (installs from `github.com/GRBurst/vernier`);
   - skim the miss list in `measurements/syllables.md`;
   - run `vernier check` on one of your own Markdown files and skim the flagged positions. `check README.md docs/specs/001-vernier/spec.md` flags 28 sentences; they looked right on a spot check.
-- M3a decisions to confirm (plan-M3a "Decisions made"): a content token with only `PUNCT` ancestors becomes a projected root; `words_between` counts tokens whose form has a letter or digit; the subject's head is not required to be a `VERB`.
+- The as-built choices awaiting the user are the eight `[NEEDS CLARIFICATION]` markers in `spec.md` (Scope; M3a 2, 4, 5, 6 ×3; M5 3), listed in `gates.md` "Review — stopped after pass 4".
 - M4 candidate stoplist additions (see above); decide on real prose, not by guess.
 - M3b decided by the user 2026-09-27 (3d31b3c): ONNX via `ort` as default; UDPipe backend is BACKLOG 10; LICENSE added by the user (0856e2c).
 - User answers 2026-09-30: ADR 0001 accepted; performance baseline recorded, not a gate (`measurements/performance-baseline.md`, BACKLOG 6); the CI example installs from `github.com/GRBurst/vernier`.
 - `just spec-check <file>` on a non-spec file (plan, audit) fails its title rule; the hook's default run checks specs only. Expected, not friction.
 
 - **Phase 2, 2026-09-30.** Review pass 1 (fresh-context `spec-review1`) FAILED with 11 blocking findings: ticked criteria had drifted from as-built plan decisions. Spec repaired in place (8723cc6, audit 013); three code defects the repair had written into the spec were fixed instead (b7bbf3d..b9e0fa4, audits 014 passive voice absent without any parse, 015 typed absence reasons). 242 tests. `gates.md` has both blocks.
+- **Review passes 2–4, 2026-09-30** (fresh-context `spec-review2..4`; 7, 3, 5 blocking findings; repairs by subagents, all test first). Code fixes: fallible stdout/stderr writes, no panics (audits 016, 019; `clippy::print_stdout`/`print_stderr` denied), fixed advice `= help:` per flag kind (M5 9, audit 017, a lost user decision), exclusive end positions past closing markup (audit 018), model limit ≥ 1 piece (020), graph contract checked at load: inputs, types, logits width (021), no folding of tall sentences (022), clap help/version through the fallible writer (`Cli::try_parse`, 023), model path missing / not a directory / not a file named correctly (024). Spec gained 8 `[NEEDS CLARIFICATION]` markers for as-built choices main or the planners made without the user. History was rewritten again during pass 4 (pass-1 commit now f2d5974); the hashes above b7bbf3d may be stale.
+- Tests after pass 4: lib 218, bin 11, cli 34, examples 1, model 3 (skipped without `VERNIER_TEST_MODEL`), onnx 9, positions 1.
+- Proposal for the user (not applied): PROCESS Clarification gate maps each answer to a named criterion or Non-Goal and fails when one has none (audit 017's rule).
 
 ## Next action
 
-1. Phase 2 review pass 2 of spec 001 by a fresh-context reviewer; repair blocking findings; stop at a pass without blocking findings or after pass 4 (PROCESS Phase 2).
-2. Then the human gates: Spec-Approval (the user confirms the criteria; also the M3a as-built choices under Open tasks) and Comprehension (three questions written by a fresh-context reviewer from the spec); record both in `gates.md`; the user's by-hand review → milestones `DONE`.
+1. Put the human gates to the user: Clarification (the 8 markers), Spec-Approval, Comprehension (three questions from a fresh-context reviewer), and the PROCESS proposal; write the answers into `spec.md`, record each gate in `gates.md`.
+2. Then the user's by-hand review (Open tasks) → milestones `DONE`.
 
 ## Known-bad approaches
 
