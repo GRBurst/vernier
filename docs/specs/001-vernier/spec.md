@@ -86,7 +86,7 @@ This is the verbatim output of `vernier check` (2026-09-30) on a file whose line
   | average sentence length | `average_sentence_length` | the file has no sentence (`no sentences`) |
   | mean dependency distance | `mean_dependency_distance` | no `--model-path`, or the parsed sentences have no content dependency (`no parse` in both cases) |
   | nominalization ratio, shown with its count as `0.077 (1 of 13 words)` | `nominalization_ratio`, and the count `nominalizations` (never absent) | the file has no word (`no words`) |
-  | passive voice | `passives` | no `--model-path` (`no parse`) |
+  | passive voice | `passives` | no sentence was parsed: no `--model-path`, or every sentence too long for the model (`no parse`) |
 
   Tree depth, subordinate clauses and center-embedding have no file-level value; they appear per sentence in diagnostics.
 
@@ -174,7 +174,7 @@ Count nominalizations (nouns derived from verbs or adjectives) and passive const
 - [x] THE engine SHALL count as a nominalization a word whose lower-cased lemma ends in `-tion`, `-sion`, `-ment`, `-ance`, `-ence` or `-ity`, has at least 7 letters, and is not on the committed stoplist `data/nominalization-stoplist.txt` (seeded from pybiber, MIT, keeping its notice). Without a parse, the candidates are the sentence's words and a word's lemma is the word with a trailing possessive `'s`, `’s`, `'` or `’` removed, then a plural `-ies` read as `-y`, or else one final `-s` removed unless it follows another `s`; with a parse, the candidates are the tokens tagged `NOUN`, with the parser's lemma, or, where the parser gives none (`_`, as the ONNX model does), the surface lemma of the token's form.
 - [x] THE engine SHALL report per file, and per sentence in the library API, the nominalization ratio = nominalizations / words, the words counted as in M2 (with or without a parse); a file without words has no ratio.
 - [x] WHEN a parse contains a token with `deprel` `aux:pass`, THE engine SHALL count its head as one passive construction (once per head) in the file's passive voice; in the library API each passive also carries its verb's form and position: the first character of the verb's form, found by matching the token forms in order against the sentence text, or the sentence's first character when a form is not found.
-- [x] WHEN no `--model-path` is given, THE engine SHALL report the file's passive voice as absent, not as zero; with a model, the file's count is the sum over its parsed sentences (0 when every sentence was too long for the model), and in the library API a sentence without a parse has no passive count.
+- [x] WHEN no sentence of a file was parsed (no `--model-path` was given, or every sentence was too long for the model), THE engine SHALL report the file's passive voice as absent, not as zero; otherwise the file's count is the sum over its parsed sentences, and in the library API a sentence without a parse has no passive count.
 
 ## M5 — Diagnostics, check mode and CI output (Status: IMPLEMENTED)
 <a id="M5"></a>
