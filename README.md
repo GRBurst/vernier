@@ -5,7 +5,7 @@ Status: spec 001 is a draft. M1 (prose extraction) and M2 (sentences, syllables,
 
 ```sh
 vernier analyze README.md                  # per file: M1 line + metric table; exit 0
-vernier check README.md                    # warning[CognitiveOverload] per flagged sentence; exit 1 if any; 2 (wins) if a file is unreadable, the model cannot load or a sentence cannot be parsed
+vernier check README.md                    # warning[CognitiveOverload] per flagged sentence; exit 1 if any; 2 (wins) if a file is unreadable, the model cannot load, a sentence cannot be parsed or stdout cannot be written
 vernier check --format compact README.md   # path:line:col: CognitiveOverload: LongSentence: …
 vernier check --format json README.md      # one JSON document, schema_version 1
 ```
