@@ -699,6 +699,32 @@ mod tests {
         assert_eq!(marker.chars().filter(|&c| c == '^').count(), 17, "{text}");
     }
 
+    /// Given sentences with a tab after one, two or three letters, such as `Ab\there now.`
+    /// When each diagnostic is rendered as text
+    /// Then the tab counts one Unicode scalar value in the column and end column, while the text
+    /// shows it as four spaces and the underline gives it four carets, wherever it stands (a
+    /// fixed width, not a tab stop) (M5 criterion 6)
+    #[test]
+    fn a_tab_is_shown_four_columns_wide() {
+        let t = Thresholds {
+            max_sentence_len: 0,
+            ..THRESHOLDS
+        };
+        for word in ["A", "Ab", "Abc"] {
+            let source = format!("{word}\there now.\n");
+            let scalars = source.trim_end().chars().count();
+            let file = analyze(&source, SourceFormat::PlainText, &t);
+            let found = diagnostics(&source, &file, &t).unwrap();
+            assert_eq!(found[0].end.column(), scalars + 1, "{word}");
+            let text = render_text("t.txt", &source, &found[0], Style::Plain);
+            let shown = format!("{word}    here now.");
+            assert!(text.lines().any(|l| l.ends_with(&shown)), "{text}");
+            let marker = text.lines().find(|l| l.contains('^')).unwrap();
+            let carets = marker.chars().filter(|&c| c == '^').count();
+            assert_eq!(carets, scalars + 3, "{text}");
+        }
+    }
+
     /// A sentence of `words` words with the flags `analyze` would give it under `t`, parsed into
     /// `metrics` or not parsed.
     fn measured(

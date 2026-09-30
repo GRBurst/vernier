@@ -260,18 +260,26 @@ impl OnnxParser {
             .get("logits")
             .ok_or_else(|| ParseError::Output("no \"logits\" output".to_string()))?;
         let (shape, values) = output.try_extract_tensor::<f32>()?;
-        let expected = [count, width, labels].map(|d| i64::try_from(d).unwrap_or(i64::MAX));
-        if shape[..] != expected {
-            return Err(ParseError::Output(format!(
-                "logits of shape {:?}, expected {expected:?}",
-                &shape[..]
-            )));
-        }
+        check_logits(shape, count, width, labels)?;
         Ok(values
             .chunks_exact(width * labels)
             .flat_map(|row| row.get(labels..(n + 1) * labels).unwrap_or_default())
             .copied()
             .collect())
+    }
+}
+
+/// Checks that the logits of a run of `rows` rows of width `width` have the shape
+/// `[rows, width, labels]`; checked on every run, so a graph whose label dimension is dynamic is
+/// held to the number of labels here.
+fn check_logits(shape: &[i64], rows: usize, width: usize, labels: usize) -> Result<(), ParseError> {
+    let expected = [rows, width, labels].map(|d| i64::try_from(d).unwrap_or(i64::MAX));
+    if shape == expected {
+        Ok(())
+    } else {
+        Err(ParseError::Output(format!(
+            "logits of shape {shape:?}, expected {expected:?}"
+        )))
     }
 }
 
@@ -490,6 +498,33 @@ mod tests {
                 Err(expected.clone()),
                 "{expected}"
             );
+        }
+    }
+
+    /// Given a run of 3 rows of width 6 with 4 labels, and the shape `logits` came back in
+    /// When the shape is checked, as on every parse
+    /// Then only `[3, 6, 4]` passes: a wrong label dimension (what a graph with a dynamic one can
+    /// return), a wrong row count or width, or a wrong rank each fail with the shape found and the
+    /// shape expected (Definitions, *Model*)
+    #[test]
+    fn a_parse_checks_the_whole_shape_of_the_logits() {
+        assert!(check_logits(&[3, 6, 4], 3, 6, 4).is_ok());
+        for shape in [
+            &[3, 6, 5][..],
+            &[3, 6, 2561],
+            &[2, 6, 4],
+            &[3, 7, 4],
+            &[1, 3, 6, 4],
+            &[18, 4],
+            &[],
+        ] {
+            match check_logits(shape, 3, 6, 4) {
+                Err(ParseError::Output(said)) => assert_eq!(
+                    said,
+                    format!("logits of shape {shape:?}, expected [3, 6, 4]")
+                ),
+                other => panic!("{shape:?}: {other:?}"),
+            }
         }
     }
 }

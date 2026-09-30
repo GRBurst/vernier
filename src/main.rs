@@ -674,6 +674,49 @@ mod tests {
         }
     }
 
+    /// Given the long-sentence file (one sentence over the length rule) and the sample file (no
+    /// sentence flagged), and a parser that finds every sentence too long for the model
+    /// When `analyze` and `check` run on each in each format, with that parser and without one
+    /// Then the exit code is the same with and without it: 1 for check on the long file, else 0
+    /// (M3b criterion 1: a too-long sentence does not change the exit code)
+    #[test]
+    fn a_too_long_sentence_keeps_the_exit_code() {
+        for (command, flagged) in [("analyze", EXIT_CLEAN), ("check", EXIT_FLAGGED)] {
+            for format in FORMATS {
+                for (file, expected) in [("long.md", flagged), ("sample.md", EXIT_CLEAN)] {
+                    let (args, mode) = command_line(command, format, &[&fixture(file)]);
+                    let mut too_long = CountingParser {
+                        pieces: 510,
+                        calls: 0,
+                    };
+                    let (mut out, mut err) = (Vec::new(), Vec::new());
+                    let with = run(
+                        &args,
+                        mode,
+                        Some(&mut too_long),
+                        Style::Plain,
+                        &mut out,
+                        &mut err,
+                    );
+                    let without = run::<CountingParser, _, _>(
+                        &args,
+                        mode,
+                        None,
+                        Style::Plain,
+                        &mut out,
+                        &mut err,
+                    );
+                    assert!(too_long.calls > 0, "{command} {format} {file}");
+                    assert_eq!(
+                        (with, without),
+                        (expected, expected),
+                        "{command} {format} {file}"
+                    );
+                }
+            }
+        }
+    }
+
     /// Given a file of three sentences and a parser that counts its calls
     /// When the file is examined as by a whole run
     /// Then the parser was called exactly once per sentence (P14), and each sentence it found too
