@@ -1,7 +1,7 @@
 //! End-to-end checks of the `vernier` binary (spec 001 M1, M2, M4, M5).
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use vernier::prose::SourceFormat;
 use vernier::summary::{FileSummary, render, summarize};
@@ -699,19 +699,91 @@ fn vernier_into_a_closed_pipe(args: &[&str], files: &[&Path]) -> Output {
 /// Given the long-sentence file, which every command and format writes something for, and a
 /// stdout whose reader has gone
 /// When `analyze` and `check` run in each format
-/// Then each exits 2 without panicking, and says so in at most one stderr line besides the
-/// no-model notice (M5 2)
+/// Then each exits 2 without panicking, and says so besides the no-model notice in exactly one
+/// stderr line, `vernier: cannot write to stdout: <cause>` (M5 2)
 #[test]
 fn a_closed_stdout_exits_2_without_a_panic() {
     let long = fixture("long.md");
+    let broken_pipe = std::io::Error::from_raw_os_error(EPIPE);
+    let expected = format!("vernier: cannot write to stdout: {broken_pipe}");
     for command in ["analyze", "check"] {
         for format in ["text", "compact", "json"] {
             let out = vernier_into_a_closed_pipe(&[command, "--format", format], &[&long, &long]);
             let stderr = String::from_utf8_lossy(&out.stderr);
             assert_eq!(out.status.code(), Some(2), "{command} {format}: {stderr}");
             assert!(!stderr.contains("panicked"), "{command} {format}: {stderr}");
-            let others = stderr.lines().filter(|line| *line != NO_MODEL).count();
-            assert!(others <= 1, "{command} {format}: {stderr}");
+            let others: Vec<&str> = stderr.lines().filter(|line| *line != NO_MODEL).collect();
+            assert_eq!(others, [expected.as_str()], "{command} {format}");
+        }
+    }
+}
+
+/// Linux's `EPIPE`: the error of a write to a pipe whose reader has gone.
+const EPIPE: i32 = 32;
+
+/// A stderr whose every write fails: a pipe whose reader has gone, and `/dev/full`.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn failing_stderrs() -> [(&'static str, Stdio); 2] {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let full = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/full")
+        .unwrap();
+    [("closed pipe", writer.into()), ("/dev/full", full.into())]
+}
+
+/// Given a missing file, or the long-sentence file for `check`, and a stderr that refuses every
+/// write (a pipe whose reader has gone, or `/dev/full`)
+/// When `check`, `check --format json` and `analyze` run on it
+/// Then none panics (exit 101): each exits with the code the other clauses give, 2 for the
+/// missing file and 1 for the flagged one, and JSON still lists no file (M5 2)
+#[test]
+fn a_failed_stderr_write_keeps_the_exit_code() {
+    let (gone, long) = (missing(), fixture("long.md"));
+    let runs: [(&[&str], &Path, i32); 4] = [
+        (&["check"], &gone, 2),
+        (&["check", "--format", "json"], &gone, 2),
+        (&["analyze"], &gone, 2),
+        (&["check"], &long, 1),
+    ];
+    for (args, file, expected) in runs {
+        for (stderr, sink) in failing_stderrs() {
+            let out = Command::new(env!("CARGO_BIN_EXE_vernier"))
+                .args(args)
+                .arg(file)
+                .stderr(sink)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(expected), "{args:?} {stderr}");
+            if args.contains(&"json") {
+                let doc: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(doc["files"], serde_json::json!([]), "{stderr}");
+            }
+        }
+    }
+}
+
+/// Given the long-sentence file, and stdout and stderr each closed (`>&-`, `2>&-`) rather than a
+/// pipe whose reader has gone
+/// When `check` runs on it in each format
+/// Then it exits 1 as with a working stdout: the standard library reopens a closed standard
+/// descriptor on `/dev/null`, so a closed descriptor reads as `/dev/null` (M5 2)
+#[test]
+fn a_closed_descriptor_reads_as_dev_null() {
+    let long = fixture("long.md");
+    for format in ["text", "compact", "json"] {
+        for closed in [">&-", "2>&-", ">&- 2>&-"] {
+            let out = Command::new("sh")
+                .arg("-c")
+                .arg(format!("exec \"$0\" \"$@\" {closed}"))
+                .arg(env!("CARGO_BIN_EXE_vernier"))
+                .args(["check", "--format", format])
+                .arg(&long)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1), "{format} {closed}");
         }
     }
 }

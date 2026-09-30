@@ -99,6 +99,7 @@ Apply this to every value that may be missing, in order:
 | `panic!`, `todo!`, `unimplemented!` on a reachable path | unchecked control flow | return `Err` | `clippy::panic`, `todo`, `unimplemented` |
 | `dbg!` | debug output leaks into the product | a test assertion | `clippy::dbg_macro` |
 | `println!`, `print!` | panics when stdout is closed (audit 016) | `writeln!` on a `W: Write`, the error propagated | `clippy::print_stdout` |
+| `eprintln!`, `eprint!` | panics when stderr is closed or full (audit 019) | `writeln!` on a `W: Write`; a failed stderr write is dropped with a `// why:` and never changes the exit code | `clippy::print_stderr` |
 | `unsafe` | escapes every guarantee | nothing, unless an ADR permits a named module (D9) | `unsafe_code = "forbid"` |
 | `RefCell`, `Mutex`, `static mut`, global state in the core | hidden mutable state | pass state in, return it out | review |
 | `SystemTime::now()`, `env::var`, file I/O in the core | ambient input | an argument or a trait, filled by the shell | review |

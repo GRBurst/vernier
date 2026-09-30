@@ -2,6 +2,7 @@
 //!
 //! The imperative shell: read files, call the pure core, print, and map the outcome to an exit code.
 
+use std::fmt::Display;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -30,16 +31,32 @@ fn main() -> ExitCode {
         Command::Analyze(args) => (args, Mode::Analyze),
         Command::Check(args) => (args, Mode::Check),
     };
-    let mut parser = match load_parser(args.model_path.as_deref()) {
+    let mut err = io::stderr().lock();
+    let mut parser = match load_parser(args.model_path.as_deref(), &mut err) {
         Ok(parser) => parser,
         Err(code) => return code,
     };
-    let stdout = std::io::stdout();
+    let stdout = io::stdout();
     let style = Style::for_output(
         stdout.is_terminal(),
         std::env::var_os("NO_COLOR").as_deref(),
     );
-    ExitCode::from(run(&args, mode, parser.as_mut(), style, &mut stdout.lock()))
+    let code = run(
+        &args,
+        mode,
+        parser.as_mut(),
+        style,
+        &mut stdout.lock(),
+        &mut err,
+    );
+    ExitCode::from(code)
+}
+
+/// Says `message` as one line on `err` (stderr). A failed write is dropped: stderr is where it
+/// would be reported, and the exit code already carries the outcome (M5 criterion 2).
+fn say<E: Write>(err: &mut E, message: impl Display) {
+    // why: a diagnostic that cannot be written cannot be reported either; never a panic.
+    let _unreported = writeln!(err, "{message}");
 }
 
 /// Which command runs: `analyze` reports, `check` lints.
@@ -81,36 +98,41 @@ enum ExamineError<E: std::error::Error> {
 /// Processes every file, writing to `out`, and the JSON document after the last one when
 /// `--format json`; the exit code is 2 if any file was unreadable (or the document could not be
 /// serialized), else 1 if `check` flagged a sentence, else 0. The first write to `out` that fails
-/// (a closed pipe) is said once on stderr and ends the run with 2.
-fn run<P: SentenceParser, W: Write>(
+/// (a closed pipe) is said once on `err` (stderr) and ends the run with 2.
+fn run<P: SentenceParser, W: Write, E: Write>(
     args: &Args,
     mode: Mode,
     mut parser: Option<&mut P>,
     style: Style,
     out: &mut W,
+    err: &mut E,
 ) -> u8 {
-    match write_all(args, mode, &mut parser, style, out) {
+    match write_all(args, mode, &mut parser, style, out, err) {
         Ok(outcomes) => exit_code(&outcomes),
-        Err(err) => {
-            eprintln!("vernier: cannot write to stdout: {err}");
+        Err(failure) => {
+            say(
+                err,
+                format_args!("vernier: cannot write to stdout: {failure}"),
+            );
             EXIT_UNREADABLE
         }
     }
 }
 
 /// Every file's outcome, with its report written to `out` (the JSON document after the last
-/// file), or the first failed write.
-fn write_all<P: SentenceParser, W: Write>(
+/// file), or the first failed write; what cannot be reported is said on `err`.
+fn write_all<P: SentenceParser, W: Write, E: Write>(
     args: &Args,
     mode: Mode,
     parser: &mut Option<&mut P>,
     style: Style,
     out: &mut W,
+    err: &mut E,
 ) -> io::Result<Vec<FileOutcome>> {
     let mut reports = Vec::new();
     let mut outcomes = Vec::with_capacity(args.files.len() + 1);
     for path in &args.files {
-        let (outcome, read) = process(args, mode, path, parser.as_deref_mut());
+        let (outcome, read) = process(args, mode, path, parser.as_deref_mut(), err);
         match (args.format, read) {
             (_, None) => {}
             (OutputFormat::Json, Some((_, report))) => reports.push(report),
@@ -121,7 +143,7 @@ fn write_all<P: SentenceParser, W: Write>(
         outcomes.push(outcome);
     }
     if args.format == OutputFormat::Json {
-        outcomes.push(print_document(&reports, out)?);
+        outcomes.push(print_document(&reports, out, err)?);
     }
     out.flush()?;
     Ok(outcomes)
@@ -140,10 +162,16 @@ fn exit_code(outcomes: &[FileOutcome]) -> u8 {
 
 /// The model of `--model-path`, loaded with the ONNX Runtime library of `ORT_DYLIB_PATH` (else
 /// the loader's `libonnxruntime.so`); without `--model-path`, none, said once on stderr. A model
-/// that cannot be loaded is named on stderr and ends the run with exit 2.
-fn load_parser(model_path: Option<&Path>) -> Result<Option<OnnxParser>, ExitCode> {
+/// that cannot be loaded is named on `err` (stderr) and ends the run with exit 2.
+fn load_parser<E: Write>(
+    model_path: Option<&Path>,
+    err: &mut E,
+) -> Result<Option<OnnxParser>, ExitCode> {
     let Some(dir) = model_path else {
-        eprintln!("vernier: no --model-path given; syntactic metrics skipped");
+        say(
+            err,
+            "vernier: no --model-path given; syntactic metrics skipped",
+        );
         return Ok(None);
     };
     let runtime = std::env::var_os("ORT_DYLIB_PATH")
@@ -151,8 +179,12 @@ fn load_parser(model_path: Option<&Path>) -> Result<Option<OnnxParser>, ExitCode
         .map_or_else(|| PathBuf::from("libonnxruntime.so"), PathBuf::from);
     match OnnxParser::load(dir, &runtime) {
         Ok(parser) => Ok(Some(parser)),
-        Err(err) => {
-            eprintln!("vernier: cannot load the model {}: {err}", dir.display());
+        Err(cause) => {
+            let dir = dir.display();
+            say(
+                err,
+                format_args!("vernier: cannot load the model {dir}: {cause}"),
+            );
             Err(ExitCode::from(EXIT_UNREADABLE))
         }
     }
@@ -160,29 +192,37 @@ fn load_parser(model_path: Option<&Path>) -> Result<Option<OnnxParser>, ExitCode
 
 /// Reads and examines one file: its outcome and, when it can be reported, its source and report.
 /// A file that cannot be read (or is not UTF-8), or holds a sentence that cannot be parsed, is
-/// named on stderr and not reported; each sentence too long for the model gets a notice on stderr.
-fn process<P: SentenceParser>(
+/// named on `err` (stderr) and not reported; each sentence too long for the model gets a notice
+/// there.
+fn process<P: SentenceParser, E: Write>(
     args: &Args,
     mode: Mode,
     path: &Path,
     parser: Option<&mut P>,
+    err: &mut E,
 ) -> (FileOutcome, Option<(String, Report)>) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(err) => {
-            eprintln!("vernier: cannot read {}: {err}", path.display());
+        Err(cause) => {
+            say(
+                err,
+                format_args!("vernier: cannot read {}: {cause}", path.display()),
+            );
             return (FileOutcome::Unreadable, None);
         }
     };
     let report = match examine(args, path, &source, parser) {
         Ok(report) => report,
-        Err(err) => {
-            eprintln!("vernier: {}", failure(path, &source, &err));
+        Err(cause) => {
+            say(
+                err,
+                format_args!("vernier: {}", failure(path, &source, &cause)),
+            );
             return (FileOutcome::Unreadable, None);
         }
     };
     for skipped in &report.too_long {
-        eprintln!("{}", too_long_notice(path, skipped));
+        say(err, too_long_notice(path, skipped));
     }
     let outcome = match mode {
         Mode::Check if !report.diagnostics.is_empty() => FileOutcome::Flagged,
@@ -317,8 +357,12 @@ fn print_report<W: Write>(
 }
 
 /// Writes the JSON document of `reports` to `out`: `Clean` when written, `Unreadable` (named on
-/// stderr) when it cannot be serialized, or the failed write.
-fn print_document<W: Write>(reports: &[Report], out: &mut W) -> io::Result<FileOutcome> {
+/// `err`) when it cannot be serialized, or the failed write.
+fn print_document<W: Write, E: Write>(
+    reports: &[Report],
+    out: &mut W,
+    err: &mut E,
+) -> io::Result<FileOutcome> {
     let files: Vec<FileReport<'_>> = reports
         .iter()
         .map(|r| FileReport {
@@ -329,8 +373,11 @@ fn print_document<W: Write>(reports: &[Report], out: &mut W) -> io::Result<FileO
         .collect();
     match json::document(&files) {
         Ok(document) => writeln!(out, "{document}").map(|()| FileOutcome::Clean),
-        Err(err) => {
-            eprintln!("vernier: cannot write the JSON document: {err}");
+        Err(cause) => {
+            say(
+                err,
+                format_args!("vernier: cannot write the JSON document: {cause}"),
+            );
             Ok(FileOutcome::Unreadable)
         }
     }
@@ -429,10 +476,23 @@ mod tests {
                     pieces: 0,
                     calls: 0,
                 };
-                let mut out = Vec::new();
-                let code = run(&args, mode, Some(&mut failing), Style::Plain, &mut out);
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let code = run(
+                    &args,
+                    mode,
+                    Some(&mut failing),
+                    Style::Plain,
+                    &mut out,
+                    &mut err,
+                );
                 assert_eq!(code, EXIT_UNREADABLE, "{command} {format}");
                 assert_eq!(failing.calls, 1, "{command} {format}");
+                let said = format!(
+                    "cannot parse the sentence at {}:",
+                    fixture("sample.md").display()
+                );
+                let stderr = String::from_utf8(err).unwrap();
+                assert!(stderr.contains(&said), "{command} {format}: {stderr}");
                 let stdout = String::from_utf8(out).unwrap();
                 match format {
                     "json" => {
@@ -448,15 +508,59 @@ mod tests {
     /// Given a readable file every command and format writes something for, and a stdout that
     /// refuses every write
     /// When `analyze` and `check` run in each format
-    /// Then the run exits 2 instead of 0 or 1 (M5 criterion 2)
+    /// Then the run exits 2 instead of 0 or 1, and says so on stderr in exactly one line,
+    /// `vernier: cannot write to stdout: <cause>` (M5 criterion 2)
     #[test]
     fn a_failed_write_exits_2() {
+        let cause = io::Error::from(io::ErrorKind::BrokenPipe);
         for command in ["analyze", "check"] {
             for format in FORMATS {
                 let (args, mode) = command_line(command, format, &[&fixture("long.md")]);
-                let code =
-                    run::<CountingParser, _>(&args, mode, None, Style::Plain, &mut ClosedPipe);
+                let mut err = Vec::new();
+                let code = run::<CountingParser, _, _>(
+                    &args,
+                    mode,
+                    None,
+                    Style::Plain,
+                    &mut ClosedPipe,
+                    &mut err,
+                );
                 assert_eq!(code, EXIT_UNREADABLE, "{command} {format}");
+                assert_eq!(
+                    String::from_utf8(err).unwrap(),
+                    format!("vernier: cannot write to stdout: {cause}\n"),
+                    "{command} {format}"
+                );
+            }
+        }
+    }
+
+    /// Given the long-sentence file and a missing one, a stdout that takes every write, and a
+    /// stderr that refuses every write
+    /// When `analyze` and `check` run on each in each format
+    /// Then the exit code is the one the other clauses give (2 for the missing file, else 0 for
+    /// analyze and 1 for check), with no panic (M5 criterion 2)
+    #[test]
+    fn a_failed_stderr_write_keeps_the_exit_code() {
+        let gone = fixture("no-such-file.md");
+        for (command, flagged) in [("analyze", EXIT_CLEAN), ("check", EXIT_FLAGGED)] {
+            for format in FORMATS {
+                for (file, expected) in [
+                    (fixture("long.md"), flagged),
+                    (gone.clone(), EXIT_UNREADABLE),
+                ] {
+                    let (args, mode) = command_line(command, format, &[&file]);
+                    let mut out = Vec::new();
+                    let code = run::<CountingParser, _, _>(
+                        &args,
+                        mode,
+                        None,
+                        Style::Plain,
+                        &mut out,
+                        &mut ClosedPipe,
+                    );
+                    assert_eq!(code, expected, "{command} {format} {}", file.display());
+                }
             }
         }
     }
@@ -469,8 +573,15 @@ mod tests {
         for (command, expected) in [("analyze", EXIT_CLEAN), ("check", EXIT_FLAGGED)] {
             for format in FORMATS {
                 let (args, mode) = command_line(command, format, &[&fixture("long.md")]);
-                let mut out = Vec::new();
-                let code = run::<CountingParser, _>(&args, mode, None, Style::Plain, &mut out);
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let code = run::<CountingParser, _, _>(
+                    &args,
+                    mode,
+                    None,
+                    Style::Plain,
+                    &mut out,
+                    &mut err,
+                );
                 assert_eq!(code, expected, "{command} {format}");
                 assert!(!out.is_empty(), "{command} {format}");
             }

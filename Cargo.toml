@@ -34,6 +34,8 @@ unimplemented = "deny"
 dbg_macro = "deny"
 # Audit 016: stdout is written through a fallible writer; `println!` panics on a closed pipe.
 print_stdout = "deny"
+# Audit 019: so is stderr; `eprintln!` panics when stderr is a closed pipe or a full device.
+print_stderr = "deny"
 
 [dev-dependencies]
 proptest = "1"
