@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 002553a372d7a272cd14955cced7d98fbf2414c7622b9c1b69fed01c670067be # shrinks to (src, format) = ("`code.` Beta\n", PlainText)
+cc 4f16885209726d7eb09eed67bfde2b6da12ccc62c0995c2c43559e8874208338 # shrinks to (src, format) = ("*em.* Beta\n", Markdown)

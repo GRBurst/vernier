@@ -30,7 +30,8 @@ impl<'b> Sentence<'b> {
         self.text
     }
 
-    /// Where the sentence starts and ends in the source file.
+    /// Where the sentence is in the source file: from its first character to just past its last
+    /// (exclusive), so markup closing after the last character lies outside.
     pub fn source_range(&self) -> Range<usize> {
         self.source_start..self.source_end
     }
@@ -78,10 +79,13 @@ fn sentence(block: &Block, range: Range<usize>) -> Option<Sentence<'_>> {
         return None;
     }
     let start = range.start + (raw.len() - raw.trim_start().len());
+    // The end maps the last character, not the offset past it: past it may be the next span's
+    // start, beyond closing markup (audit 018).
+    let last = text.chars().next_back().map_or(0, char::len_utf8);
     Some(Sentence {
         text,
         source_start: block.source_offset(start),
-        source_end: block.source_offset(start + text.len()),
+        source_end: block.source_offset(start + text.len() - last) + last,
         block,
         block_start: start,
     })
@@ -223,6 +227,20 @@ mod tests {
         assert_eq!(&md[found[0].source_range()], "Intro here.");
     }
 
+    /// Given a sentence whose last character is inside emphasis, with more prose after it
+    /// When it is split
+    /// Then its source range still ends just past that character, before the closing `*`
+    #[test]
+    fn a_source_range_ends_before_closing_markup() {
+        let md = "He said *hi.* Then left.\n";
+        let all = blocks(md, SourceFormat::Markdown);
+        let block = Block::from_spans(&all[0]);
+        let found = sentences(&block);
+        assert_eq!(found.len(), 2);
+        assert_eq!(&md[found[0].source_range()], "He said *hi.");
+        assert_eq!(&md[found[1].source_range()], "Then left.");
+    }
+
     fn piece() -> impl Strategy<Value = String> {
         prop::sample::select(vec![
             "alpha",
@@ -289,8 +307,9 @@ mod tests {
 
         /// Given generated Markdown and plain text
         /// When each block is split into sentences
-        /// Then every sentence is trimmed and holds a word, and the sentences are strictly
-        /// ordered and disjoint in the block and in the source
+        /// Then every sentence is trimmed and holds a word, its source range starts at its first
+        /// and ends just past its last character, and the sentences are strictly ordered and
+        /// disjoint in the block and in the source
         #[test]
         fn sentences_are_trimmed_ordered_and_disjoint((src, format) in source()) {
             for spans in blocks(&src, format) {
@@ -300,7 +319,9 @@ mod tests {
                     prop_assert!(!s.text().is_empty() && s.text().trim() == s.text(), "{:?}", s);
                     prop_assert!(count_words(s.text()) > 0);
                     prop_assert!(s.source_range().start < s.source_range().end);
-                    prop_assert!(src.get(s.source_range()).is_some());
+                    let in_source = src.get(s.source_range()).unwrap_or_default();
+                    prop_assert_eq!(in_source.chars().next(), s.text().chars().next(), "{:?}", s);
+                    prop_assert_eq!(in_source.chars().next_back(), s.text().chars().next_back(), "{:?}", s);
                 }
                 for pair in found.windows(2) {
                     let first_end = offset_in(block.text(), pair[0].text()) + pair[0].text().len();
