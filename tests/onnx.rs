@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use vernier::decoder::LabelError;
 use vernier::dependency::{DependencyTree, Parse, Parser};
-use vernier::onnx::{LoadError, OnnxParser};
+use vernier::onnx::{GraphError, LoadError, OnnxParser};
 
 /// A usable `config.json`: four labels and RoBERTa's positions.
 const CONFIG: &str = r#"{
@@ -190,4 +190,51 @@ fn parses_the_example_into_a_tree() {
         }
     }
     assert!(DependencyTree::new(tokens).is_ok());
+}
+
+/// A copy of the model in `model` whose `config.json` keeps only four labels (label 0, a
+/// relation, a root and goeswith), so its label count no longer matches the graph's `logits`;
+/// the tokenizer and the graph are linked, not copied. Returns the copy and the original count.
+// why: a test helper; clippy's allow-unwrap-in-tests covers only `#[test]` items (audit 003).
+#[allow(clippy::unwrap_used)]
+fn with_four_labels(model: &Path) -> (PathBuf, usize) {
+    let dir = model_dir("four-labels", &[]);
+    let config = fs::read_to_string(model.join("config.json")).unwrap();
+    let mut config: serde_json::Value = serde_json::from_str(&config).unwrap();
+    let labels = config["id2label"].as_object().unwrap().len();
+    config["id2label"] = serde_json::json!(
+        {"0": "-|_|dep", "1": "NOUN|_|nsubj", "2": "VERB|_|root", "3": "X|_|goeswith"}
+    );
+    fs::write(dir.join("config.json"), config.to_string()).unwrap();
+    for file in ["tokenizer.json", "onnx/model.onnx"] {
+        std::os::unix::fs::symlink(model.join(file).canonicalize().unwrap(), dir.join(file))
+            .unwrap();
+    }
+    (dir, labels)
+}
+
+/// Given a copy of the model in `VERNIER_TEST_MODEL` whose `config.json` has four labels while
+/// the graph's `logits` has one per label of the original
+/// When it is loaded
+/// Then the load fails, naming the graph and both counts, before any sentence is parsed
+/// (Definitions, *Model*; M3b criterion 6)
+#[test]
+fn a_model_whose_labels_do_not_match_its_logits_is_refused() {
+    let Some(model) = std::env::var_os("VERNIER_TEST_MODEL") else {
+        println!("skipped: VERNIER_TEST_MODEL is not set");
+        return;
+    };
+    let runtime = std::env::var_os("ORT_DYLIB_PATH")
+        .filter(|path| !path.is_empty())
+        .map_or_else(|| PathBuf::from("libonnxruntime.so"), PathBuf::from);
+    let (dir, labels) = with_four_labels(Path::new(&model));
+    match OnnxParser::load(&dir, &runtime) {
+        Ok(_) => panic!("{} loaded", dir.display()),
+        Err(LoadError::Graph { path, problem }) => {
+            assert_eq!(path, dir.join("onnx/model.onnx"));
+            let width = i64::try_from(labels).unwrap();
+            assert_eq!(problem, GraphError::Width { width, labels: 4 });
+        }
+        Err(other) => panic!("{other:?}"),
+    }
 }

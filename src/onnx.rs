@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use ort::session::Session;
-use ort::value::Tensor;
+use ort::value::{Outlet, Tensor, ValueType};
 use tokenizers::Tokenizer;
 
 use crate::decoder::{
@@ -19,6 +19,10 @@ use crate::dependency::{Parse, Parser};
 const CONFIG: &str = "config.json";
 const TOKENIZER: &str = "tokenizer.json";
 const MODEL: &str = "onnx/model.onnx";
+
+/// The graph's inputs and its output (Definitions, *Model*).
+const INPUTS: [&str; 2] = ["input_ids", "attention_mask"];
+const LOGITS: &str = "logits";
 
 /// A loaded model: its session, tokenizer and label set.
 pub struct OnnxParser {
@@ -49,6 +53,71 @@ pub enum LoadError {
     Runtime { source: ort::LoadDynamicError },
     #[error("{} is not a usable ONNX model: {source}", path.display())]
     Session { path: PathBuf, source: ort::Error },
+    #[error("{} does not match {CONFIG}: {problem}", path.display())]
+    Graph { path: PathBuf, problem: GraphError },
+}
+
+/// Why a model's graph does not fit its `config.json` or the inputs vernier gives it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GraphError {
+    #[error("the graph has no input \"{name}\"")]
+    NoInput { name: &'static str },
+    #[error("the graph has an input \"{name}\" besides \"input_ids\" and \"attention_mask\"")]
+    OtherInput { name: String },
+    #[error("the graph has no output \"logits\"")]
+    NoLogits,
+    #[error("the graph's output \"logits\" is not a tensor")]
+    LogitsNotTensor,
+    #[error("the graph's \"logits\" has {width} values per piece, but there are {labels} labels")]
+    Width { width: i64, labels: usize },
+}
+
+/// What a graph offers under the name `logits`: nothing, something other than a tensor, or a
+/// tensor with these dimensions (`-1` where a dimension is dynamic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogitsOutlet<'a> {
+    Missing,
+    NotTensor,
+    Tensor(&'a [i64]),
+}
+
+/// The graph's `logits` output among `outputs`.
+fn logits_outlet(outputs: &[Outlet]) -> LogitsOutlet<'_> {
+    match outputs.iter().find(|outlet| outlet.name() == LOGITS) {
+        None => LogitsOutlet::Missing,
+        Some(outlet) => match outlet.dtype() {
+            ValueType::Tensor { shape, .. } => LogitsOutlet::Tensor(shape),
+            ValueType::Sequence(_) | ValueType::Map { .. } | ValueType::Optional(_) => {
+                LogitsOutlet::NotTensor
+            }
+        },
+    }
+}
+
+/// Whether a graph with these input names and this `logits` output fits `labels` labels: its
+/// inputs are exactly `input_ids` and `attention_mask`, it has a tensor output `logits`, and the
+/// last dimension of `logits` is the label count where the graph states it (a dynamic or unstated
+/// last dimension is accepted here and checked on every parse).
+fn check_graph(inputs: &[&str], logits: LogitsOutlet<'_>, labels: usize) -> Result<(), GraphError> {
+    if let Some(name) = INPUTS.into_iter().find(|name| !inputs.contains(name)) {
+        return Err(GraphError::NoInput { name });
+    }
+    if let Some(name) = inputs.iter().find(|name| !INPUTS.contains(name)) {
+        return Err(GraphError::OtherInput {
+            name: (*name).to_owned(),
+        });
+    }
+    let dims = match logits {
+        LogitsOutlet::Missing => return Err(GraphError::NoLogits),
+        LogitsOutlet::NotTensor => return Err(GraphError::LogitsNotTensor),
+        LogitsOutlet::Tensor(dims) => dims,
+    };
+    match dims.last() {
+        Some(&width) if width >= 0 && usize::try_from(width) != Ok(labels) => {
+            Err(GraphError::Width { width, labels })
+        }
+        Some(_) | None => Ok(()),
+    }
 }
 
 /// Why a sentence could not be parsed.
@@ -66,7 +135,8 @@ pub enum ParseError {
 
 impl OnnxParser {
     /// Loads the model in `model_dir` with the ONNX Runtime library at `runtime`. The model's
-    /// files are checked first, so a missing file is named without the runtime being loaded.
+    /// files are checked first, so a missing file is named without the runtime being loaded;
+    /// the graph is checked against `config.json` last, from the session's metadata.
     /// Call it at most once per process after a runtime failure: `ort` 2.0.0-rc.13 marks its
     /// library slot filled even when loading fails, so a second load would use an unset slot.
     pub fn load(model_dir: &Path, runtime: &Path) -> Result<Self, LoadError> {
@@ -85,9 +155,16 @@ impl OnnxParser {
         let session = Session::builder()
             .and_then(|mut builder| builder.commit_from_file(&model))
             .map_err(|source| LoadError::Session {
-                path: model,
+                path: model.clone(),
                 source,
             })?;
+        let inputs: Vec<&str> = session.inputs().iter().map(Outlet::name).collect();
+        check_graph(&inputs, logits_outlet(session.outputs()), labels.len()).map_err(
+            |problem| LoadError::Graph {
+                path: model,
+                problem,
+            },
+        )?;
         Ok(Self {
             session,
             tokenizer,
@@ -225,4 +302,90 @@ fn read_tokenizer(path: PathBuf) -> Result<(Tokenizer, Special), LoadError> {
         mask: id("<mask>")?,
     };
     Ok((tokenizer, special))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BOTH: [&str; 2] = ["attention_mask", "input_ids"];
+
+    /// Given the tested model's graph shape (inputs in either order, `logits` of
+    /// `[batch, width, 2561]` with dynamic batch and width) and 2561 labels, or a dynamic or
+    /// unstated label dimension
+    /// When the graph is checked
+    /// Then it fits (Definitions, *Model*)
+    #[test]
+    fn a_graph_with_the_contracts_inputs_and_width_fits() {
+        for inputs in [INPUTS, BOTH] {
+            for dims in [&[-1, -1, 2561][..], &[-1, -1, -1], &[]] {
+                let logits = LogitsOutlet::Tensor(dims);
+                assert_eq!(
+                    check_graph(&inputs, logits, 2561),
+                    Ok(()),
+                    "{inputs:?} {dims:?}"
+                );
+            }
+        }
+    }
+
+    /// Given a graph that breaks the contract in one way each: an input missing, an input
+    /// besides the two, no `logits`, a `logits` that is not a tensor, a stated label dimension
+    /// other than the label count
+    /// When the graph is checked against 4 labels
+    /// Then each is refused with its own reason (Definitions, *Model*; M3b criterion 6)
+    #[test]
+    fn a_graph_that_breaks_the_contract_is_refused() {
+        let fitting = LogitsOutlet::Tensor(&[-1, -1, 4]);
+        let cases = [
+            (
+                &["input_ids"][..],
+                fitting,
+                GraphError::NoInput {
+                    name: "attention_mask",
+                },
+            ),
+            (
+                &["attention_mask"],
+                fitting,
+                GraphError::NoInput { name: "input_ids" },
+            ),
+            (
+                &["input_ids", "attention_mask", "token_type_ids"],
+                fitting,
+                GraphError::OtherInput {
+                    name: "token_type_ids".to_owned(),
+                },
+            ),
+            (&INPUTS, LogitsOutlet::Missing, GraphError::NoLogits),
+            (
+                &INPUTS,
+                LogitsOutlet::NotTensor,
+                GraphError::LogitsNotTensor,
+            ),
+            (
+                &INPUTS,
+                LogitsOutlet::Tensor(&[1, 6, 2561]),
+                GraphError::Width {
+                    width: 2561,
+                    labels: 4,
+                },
+            ),
+            (
+                &INPUTS,
+                LogitsOutlet::Tensor(&[-1, -1, 0]),
+                GraphError::Width {
+                    width: 0,
+                    labels: 4,
+                },
+            ),
+        ];
+        for (inputs, logits, expected) in cases {
+            assert_eq!(
+                check_graph(inputs, logits, 4),
+                Err(expected.clone()),
+                "{expected}"
+            );
+        }
+    }
 }
