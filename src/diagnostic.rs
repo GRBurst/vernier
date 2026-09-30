@@ -71,12 +71,29 @@ pub fn diagnostics(
         .collect()
 }
 
-/// One flag of a sentence, named, with the measured value and its maximum in words.
+/// One flag of a sentence, named, with the measured value and its maximum in words, and the
+/// flag's fixed advice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagMessage {
     pub name: &'static str,
     pub message: String,
+    /// The same text for every sentence the flag is raised on; it never quotes the sentence.
+    pub help: &'static str,
 }
+
+/// The advice of `LongSentence`.
+pub const LONG_SENTENCE_HELP: &str = "Split the sentence into shorter ones.";
+/// The advice of `HighMdd`.
+pub const HIGH_MDD_HELP: &str =
+    "Put words that belong together closer, e.g. the verb near its subject.";
+/// The advice of `DeepTree`.
+pub const DEEP_TREE_HELP: &str =
+    "Flatten nested phrases, or move some into a sentence of their own.";
+/// The advice of `ClauseOverload`.
+pub const CLAUSE_OVERLOAD_HELP: &str = "Move a subordinate clause into a sentence of its own.";
+/// The advice of `CenterEmbedding`.
+pub const CENTER_EMBEDDING_HELP: &str = "Move the clause between the subject and its verb after the verb, or make it a sentence of \
+     its own.";
 
 impl fmt::Display for FlagMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -95,8 +112,9 @@ pub fn render_compact(path: &str, diagnostic: &Diagnostic) -> String {
     )
 }
 
-/// The annotated diagnostic: `warning[CognitiveOverload]`, the sentence's position, and its source
-/// lines with the whole sentence underlined.
+/// The annotated diagnostic: `warning[CognitiveOverload]`, the sentence's position, its source
+/// lines with the whole sentence underlined, the `= metrics:` list, then one `= help:` line per
+/// flag, in flag order.
 pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Style) -> String {
     let listed: Vec<String> = diagnostic
         .metrics
@@ -115,6 +133,12 @@ pub fn render_text(path: &str, source: &str, diagnostic: &Diagnostic, style: Sty
             Level::NOTE
                 .no_name()
                 .message(format!("metrics:\n{}", listed.join("\n"))),
+        )
+        .elements(
+            diagnostic
+                .flags
+                .iter()
+                .map(|flag| Level::HELP.message(flag.help)),
         );
     let renderer = match style {
         Style::Plain => Renderer::plain(),
@@ -258,6 +282,7 @@ fn surface_message(
                 "sentence has {} words (max {})",
                 sentence.counts.words, thresholds.max_sentence_len
             ),
+            help: LONG_SENTENCE_HELP,
         },
     }
 }
@@ -270,6 +295,7 @@ fn syntactic_message(flag: &SyntacticFlag, thresholds: &Thresholds) -> FlagMessa
                 "mean dependency distance {mdd:.2} (max {:.2})",
                 thresholds.max_mdd
             ),
+            help: HIGH_MDD_HELP,
         },
         SyntacticFlag::DeepTree { depth } => FlagMessage {
             name: "DeepTree",
@@ -277,6 +303,7 @@ fn syntactic_message(flag: &SyntacticFlag, thresholds: &Thresholds) -> FlagMessa
                 "dependency tree depth {depth} edges (max {})",
                 thresholds.max_tree_depth
             ),
+            help: DEEP_TREE_HELP,
         },
         SyntacticFlag::ClauseOverload { clauses } => FlagMessage {
             name: "ClauseOverload",
@@ -284,6 +311,7 @@ fn syntactic_message(flag: &SyntacticFlag, thresholds: &Thresholds) -> FlagMessa
                 "{clauses} subordinate clauses (max {})",
                 thresholds.max_clauses
             ),
+            help: CLAUSE_OVERLOAD_HELP,
         },
         SyntacticFlag::CenterEmbedding(e) => FlagMessage {
             name: "CenterEmbedding",
@@ -291,6 +319,7 @@ fn syntactic_message(flag: &SyntacticFlag, thresholds: &Thresholds) -> FlagMessa
                 "subject \"{}\" separated from verb \"{}\" by {} words",
                 e.subject, e.verb, e.words_between
             ),
+            help: CENTER_EMBEDDING_HELP,
         },
     }
 }
@@ -346,6 +375,99 @@ mod tests {
         for (flag, expected) in cases {
             assert_eq!(syntactic_message(&flag, &THRESHOLDS).to_string(), expected);
         }
+    }
+
+    /// Given each flag, raised twice with different values
+    /// When its message is built
+    /// Then its advice is the spec's fixed text for that flag, the same for both values (so it
+    /// never depends on, or quotes, the sentence), and the compact form omits it (M5)
+    #[test]
+    fn each_flag_carries_its_fixed_advice() {
+        let embedding = |subject: &str, words_between| {
+            SyntacticFlag::CenterEmbedding(CenterEmbedding {
+                subject: subject.to_owned(),
+                verb: "caused".to_owned(),
+                words_between,
+            })
+        };
+        let cases = [
+            (
+                [
+                    SyntacticFlag::HighMdd { mdd: 3.5 },
+                    SyntacticFlag::HighMdd { mdd: 9.0 },
+                ],
+                "Put words that belong together closer, e.g. the verb near its subject.",
+            ),
+            (
+                [
+                    SyntacticFlag::DeepTree { depth: 6 },
+                    SyntacticFlag::DeepTree { depth: 11 },
+                ],
+                "Flatten nested phrases, or move some into a sentence of their own.",
+            ),
+            (
+                [
+                    SyntacticFlag::ClauseOverload { clauses: 3 },
+                    SyntacticFlag::ClauseOverload { clauses: 7 },
+                ],
+                "Move a subordinate clause into a sentence of its own.",
+            ),
+            (
+                [embedding("proposal", 8), embedding("dog", 3)],
+                "Move the clause between the subject and its verb after the verb, or make it a \
+                 sentence of its own.",
+            ),
+        ];
+        for (flags, advice) in cases {
+            for flag in &flags {
+                let message = syntactic_message(flag, &THRESHOLDS);
+                assert_eq!(message.help, advice, "{}", message.name);
+                assert!(!message.to_string().contains(advice), "{message}");
+            }
+        }
+        for words in [26, 40] {
+            let long = measured(words, None, &THRESHOLDS);
+            let message = surface_message(Flag::LongSentence, &long, &THRESHOLDS);
+            assert_eq!(message.help, "Split the sentence into shorter ones.");
+        }
+    }
+
+    /// The `= help:` lines at the end of a rendered text diagnostic, trimmed.
+    fn help_lines(text: &str) -> Vec<&str> {
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let helps = lines
+            .iter()
+            .rev()
+            .take_while(|l| l.starts_with("= help: "))
+            .count();
+        lines[lines.len() - helps..].to_vec()
+    }
+
+    /// Given a sentence flagged LongSentence and DeepTree
+    /// When its diagnostic is rendered as text
+    /// Then it ends with one `= help:` line per flag, in flag order, after the metrics
+    #[test]
+    fn the_text_ends_with_one_help_line_per_flag() {
+        let file = file_of(vec![sentence(
+            0..15,
+            30,
+            vec![Flag::LongSentence],
+            vec![SyntacticFlag::DeepTree { depth: 6 }],
+        )]);
+        let found = diagnostics("First sentence.\n", &file, &THRESHOLDS).unwrap();
+        let text = render_text("f.md", "First sentence.\n", &found[0], Style::Plain);
+        assert_eq!(
+            help_lines(&text),
+            [
+                "= help: Split the sentence into shorter ones.",
+                "= help: Flatten nested phrases, or move some into a sentence of their own.",
+            ],
+            "{text}"
+        );
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let last_metric = lines.iter().rposition(|l| l.starts_with("- ")).unwrap();
+        let first_help = lines.iter().position(|l| l.starts_with("= help:")).unwrap();
+        assert!(last_metric < first_help, "{text}");
     }
 
     fn sentence(
@@ -570,6 +692,7 @@ mod tests {
                 "- tree depth: absent (no parse)",
                 "- subordinate clauses: absent (no parse)",
                 "- center-embedding: absent (no parse)",
+                "= help: Split the sentence into shorter ones.",
             ],
             "{text}"
         );
@@ -711,6 +834,39 @@ mod tests {
                     prop_assert_eq!(listed, embedded, "{:?}", lines);
                 }
             }
+        }
+
+        /// Given any sentence, parsed or not, flagged by thresholds that equal its metrics half the
+        /// time
+        /// When its diagnostic is rendered as text
+        /// Then it ends with exactly one `= help:` line per flag, in flag order, each the flag's
+        /// advice
+        #[test]
+        fn the_text_gives_each_flags_advice_in_order(
+            words in 1usize..40,
+            metrics in metrics_or_none(),
+            limits in (0usize..40, 0.5f64..4.0, 0usize..9, 0usize..5),
+        ) {
+            let t = Thresholds {
+                max_sentence_len: limits.0,
+                max_mdd: limits.1,
+                max_tree_depth: limits.2,
+                max_clauses: limits.3,
+            };
+            let sentence = measured(words, metrics, &t);
+            let flags = flag_messages(&sentence, &t);
+            prop_assume!(!flags.is_empty());
+            let index = LineIndex::new("A.\n");
+            let d = Diagnostic {
+                start: index.position(0).unwrap(),
+                end: index.position(1).unwrap(),
+                source_range: 0..1,
+                metrics: metric_lines(&sentence, &t),
+                flags,
+            };
+            let text = render_text("f.md", "A.\n", &d, Style::Plain);
+            let expected: Vec<String> = d.flags.iter().map(|f| format!("= help: {}", f.help)).collect();
+            prop_assert_eq!(help_lines(&text), expected, "{}", text);
         }
 
         /// Given generated documents with every sentence flagged

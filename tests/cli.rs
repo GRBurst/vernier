@@ -434,7 +434,8 @@ fn check_flags_a_long_sentence_and_exits_1() {
 /// Given the file with one 30-word sentence
 /// When `vernier check` runs with the default `text` format
 /// Then it prints one `warning[CognitiveOverload]` diagnostic at 3:20 showing the whole line, with
-/// the words and LongSentence and the syntactic metrics absent (no parse), and exits 1
+/// the words and LongSentence and the syntactic metrics absent (no parse), then LongSentence's
+/// advice as the one `= help:` line, and exits 1
 #[test]
 fn check_prints_a_cognitive_overload_diagnostic() {
     let path = fixture("long.md");
@@ -460,6 +461,16 @@ fn check_prints_a_cognitive_overload_diagnostic() {
     );
     assert!(
         listed.contains(&"- mean dependency distance: absent (no parse)"),
+        "{stdout}"
+    );
+    let helps: Vec<&str> = listed
+        .iter()
+        .copied()
+        .filter(|l| l.starts_with("= help:"))
+        .collect();
+    assert_eq!(
+        helps,
+        ["= help: Split the sentence into shorter ones."],
         "{stdout}"
     );
 }

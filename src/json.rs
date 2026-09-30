@@ -121,6 +121,7 @@ impl<'a> DiagnosticJson<'a> {
 struct FlagJson<'a> {
     name: &'static str,
     message: &'a str,
+    help: &'static str,
 }
 
 impl<'a> FlagJson<'a> {
@@ -128,6 +129,7 @@ impl<'a> FlagJson<'a> {
         Self {
             name: flag.name,
             message: &flag.message,
+            help: flag.help,
         }
     }
 }
@@ -232,6 +234,10 @@ mod tests {
         );
         assert_eq!(d["flags"][0]["name"], "LongSentence");
         assert_eq!(d["flags"][0]["message"], "sentence has 30 words (max 25)");
+        assert_eq!(
+            d["flags"][0]["help"],
+            "Split the sentence into shorter ones."
+        );
     }
 
     fn document_source() -> impl Strategy<Value = String> {
@@ -255,8 +261,9 @@ mod tests {
     proptest! {
         /// Given generated documents and a sentence-length limit
         /// When their JSON document is written
-        /// Then every file's metrics are its summary's fields (null exactly when absent) and every
-        /// diagnostic's line, column, end line and end column are its start and end positions
+        /// Then every file's metrics are its summary's fields (null exactly when absent), every
+        /// diagnostic's line, column, end line and end column are its start and end positions,
+        /// and its flags are its flags' names, messages and advice, in order
         #[test]
         fn the_document_carries_the_summaries_and_positions(
             sources in prop::collection::vec(document_source(), 1..3),
@@ -292,9 +299,15 @@ mod tests {
                     let at = |key: &str| d[key].as_u64().and_then(|n| usize::try_from(n).ok());
                     prop_assert_eq!((at("line"), at("column")), (Some(expected.start.line()), Some(expected.start.column())));
                     prop_assert_eq!((at("end_line"), at("end_column")), (Some(expected.end.line()), Some(expected.end.column())));
-                    let names: Vec<&str> = d["flags"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str()).collect();
-                    let expected_names: Vec<&str> = expected.flags.iter().map(|f| f.name).collect();
-                    prop_assert_eq!(names, expected_names);
+                    let flags: Vec<(&str, &str, &str)> = d["flags"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter_map(|f| Some((f["name"].as_str()?, f["message"].as_str()?, f["help"].as_str()?)))
+                        .collect();
+                    let expected_flags: Vec<(&str, &str, &str)> =
+                        expected.flags.iter().map(|f| (f.name, f.message.as_str(), f.help)).collect();
+                    prop_assert_eq!(flags, expected_flags);
                 }
             }
         }

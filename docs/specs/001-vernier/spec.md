@@ -22,12 +22,13 @@ warning[CognitiveOverload]: Sentence exceeds human working-memory capacity
      - tree depth: 4 edges (max 5)
      - subordinate clauses: 1 (max 2)
      - center-embedding: subject "proposal" separated from verb "caused" by 8 words (CenterEmbedding)
+   = help: Move the clause between the subject and its verb after the verb, or make it a sentence of its own.
 
 $ echo $?
 1
 ```
 
-This is the verbatim output of `vernier check` (2026-09-30) on a file whose line 42 is the M3a example sentence; only the two paths and the line number are illustrative.
+This is the verbatim output of this command (2026-09-30), run on a file `docs/architecture.md` whose line 42 is the M3a example sentence, with the tested model (M3b) in `models/roberta-base-english-ud-goeswith-onnx`.
 
 **Scope:**
 
@@ -41,7 +42,7 @@ This is the verbatim output of `vernier check` (2026-09-30) on a file whose line
 
 - THE tool SHALL NOT analyze languages other than English in this spec.
 - THE tool SHALL NOT bundle a parser model in the binary or the repository (the user supplies it; license in M3b).
-- THE tool SHALL NOT rewrite the user's text; suggestions are fixed advice per rule, never generated sentences.
+- THE tool SHALL NOT rewrite the user's text; suggestions are fixed advice per rule (M5 criterion 9), never generated sentences.
 - THE tool SHALL NOT read a configuration file in this spec; thresholds come from flags only.
 - THE tool SHALL NOT download a parser model in this spec; a model reaches the tool only through `--model-path`.
 
@@ -50,7 +51,7 @@ This is the verbatim output of `vernier check` (2026-09-30) on a file whose line
 - Drafted from the user's project description of 2026-09-26 ("Project Specification: Standalone Markdown Cognitive Readability & Syntactic Complexity Analyzer in Rust").
 - Decided by the user on 2026-09-26: the center-embedding distance counts the words strictly between subject and verb (the example's "9" became 8); the parser choice (udpipe vs ONNX via `ort`) stays open until a spike at the start of M3b; the model license is checked before M3b and no model is bundled.
   The open parser choice is superseded by the decision of 2026-09-27 below.
-- Clarified by the user on 2026-09-26 (evidence: [open-questions report](2026-09-26-vernier-open-questions-answered.md), [research/](research/)): suggestions are fixed advice per rule; vernier is for personal, non-commercial use, so the CC BY-NC-SA 4.0 UDPipe 1 English model is acceptable when the user supplies it; no downloader; the parser route is still chosen by the M3b spike. The other ten markers were answered by research and accepted by the user.
+- Clarified by the user on 2026-09-26 (evidence: [open-questions report](2026-09-26-vernier-open-questions-answered.md), [research/](research/)): suggestions are fixed advice per rule (no criterion carried this answer until review pass 2 added M5 criterion 9); vernier is for personal, non-commercial use, so the CC BY-NC-SA 4.0 UDPipe 1 English model is acceptable when the user supplies it; no downloader; the parser route is still chosen by the M3b spike. The other ten markers were answered by research and accepted by the user.
   Superseded for the default parser by the decision of 2026-09-27 below; the UDPipe 1 model's acceptance applies to a UDPipe backend, now [BACKLOG](../../BACKLOG.md) item 10.
 - Decided by the user on 2026-09-27 (evidence: [research/m3b-parser-spike.md](research/m3b-parser-spike.md)): the ONNX route (`ort` with the RoBERTa goeswith UD model) is the default parser, because the user's use is not time-critical and prefers accuracy (UAS 94.8 % against 83.0 % for UDPipe 1, and it parses the M3a example right); the spike's timings are a tendency, not isolated reproducible benchmarks; a user-selectable backend (UDPipe 1, or different models per metric) is a follow-up, with its conditions in [BACKLOG](../../BACKLOG.md) item 10.
 - The M3b spike report, comparing the `udpipe` route and the ONNX-via-`ort` route on build inside devenv, binary size, per-sentence time on a committed sample and output on the M3a example sentence, was committed in `7f60be9` before any parser code; the user chose the ONNX route from it (above).
@@ -185,12 +186,13 @@ Render findings like compiler diagnostics, add JSON and compact output, and make
 
 - [x] WHEN a sentence carries at least one flag, THE `check` command SHALL print, in the default `text` format, one `warning[CognitiveOverload]` diagnostic for it. The diagnostic points at the sentence's first character, underlines the sentence over all its lines, and lists every metric that a rule checks (words, mean dependency distance, tree depth, subordinate clauses, center-embedding) with its value, its maximum where it has one, and the flag, if raised. A syntactic metric of an unparsed sentence is listed as `absent (no parse)`, of a sentence too long for the model as `absent (too long for the model)`; the mean dependency distance of a parsed sentence without a content dependency is listed as `absent (no content dependency)`, and a parsed sentence without center-embedding lists `center-embedding: none`.
 - [x] THE `check` command SHALL exit 0 when no sentence is flagged and 1 when at least one is, in every format, unless an exit-2 cause of this criterion applies. IF any file cannot be read (including a file that is not valid UTF-8), the model or ONNX Runtime cannot be loaded, a sentence cannot be parsed (named on stderr as `PATH:LINE:COL` with the cause), or a write to stdout fails (such as a pipe whose reader has gone), THEN both commands SHALL exit 2, and 2 SHALL take precedence over 1. IF a write to stdout fails, THEN the tool SHALL stop at that write without a panic and say so in one stderr line, `vernier: cannot write to stdout: <cause>`. IF the command line is a usage error (clap, such as `vernier check` without files), THEN the tool SHALL exit 2.
-- [x] WHEN `--format json` is given, THE tool (`analyze` and `check` alike) SHALL print, after all files, one JSON document with `schema_version` 1 and `files`, one object per file that was read and reported, with `path`, `metrics` (the file metrics under their JSON keys, see Definitions) and `diagnostics`. Each diagnostic has `code`, `severity` (`warning`), `message`, `line`, `column`, `end_line`, `end_column` and `flags` (each with `name` and `message`), and its positions equal those of the text format.
+- [x] WHEN `--format json` is given, THE tool (`analyze` and `check` alike) SHALL print, after all files, one JSON document with `schema_version` 1 and `files`, one object per file that was read and reported, with `path`, `metrics` (the file metrics under their JSON keys, see Definitions) and `diagnostics`. Each diagnostic has `code`, `severity` (`warning`), `message`, `line`, `column`, `end_line`, `end_column` and `flags` (each with `name`, `message` and `help`, the flag's advice of M5 criterion 9), and its positions equal those of the text format.
 - [x] WHEN `--format compact` is given, THE `check` command SHALL print one line per diagnostic as `path:line:col: code: message`, where the code is `CognitiveOverload` and the message joins the diagnostic's flag messages, each `FLAG: message`, with `; `.
 - [x] THE `analyze` command SHALL print per file, in the `text` and `compact` formats, M1's summary line followed by a table with a `metric`/`value` header and one row per file metric with a table label below M1's line (see Definitions), in that order, an absent metric reading `absent (<reason>)`, and exit 0 whatever the metrics are.
 - [x] THE rendered line and column of every diagnostic SHALL point at the sentence's first character in the source, and SHALL be the same in the text, compact and JSON formats (property test over generated documents).
 - [x] THE repository SHALL contain a GitHub Actions example under `docs/examples/` that runs `vernier check` and fails the job on exit 1.
 - [x] THE CLI SHALL offer two subcommands, `vernier analyze [OPTIONS] <FILES>...` and `vernier check [OPTIONS] <FILES>...`, each requiring at least one file and accepting the options `--format text|json|compact` (default `text`), `--max-sentence-len` (default 25), `--max-mdd` (a finite number above 0, default 3), `--max-tree-depth` (default 5), `--max-clauses` (default 2) and `--model-path` (no default), as `vernier <COMMAND> --help` shows them.
+- [x] WHEN a diagnostic is printed in the `text` format, THE `check` command SHALL end it with one `= help: <advice>` line per flag of the diagnostic, in the order of its flags (as in JSON `flags` and the compact message), so a sentence with two center-embeddings gets two; the advice SHALL be the fixed text of the flag, never a quotation of the sentence: `LongSentence` "Split the sentence into shorter ones.", `HighMdd` "Put words that belong together closer, e.g. the verb near its subject.", `DeepTree` "Flatten nested phrases, or move some into a sentence of their own.", `ClauseOverload` "Move a subordinate clause into a sentence of its own.", `CenterEmbedding` "Move the clause between the subject and its verb after the verb, or make it a sentence of its own."; the `compact` format SHALL carry no advice.
 
 **Implementation Details:**
 
